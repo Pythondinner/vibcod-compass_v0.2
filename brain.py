@@ -263,30 +263,62 @@ def check_thread_drift(topic_label: str, thread_label: str, record_type: str | N
     ])
 
 
-def check_implementation(topic_label: str, project_path: str) -> str:
-    """比对"当前决定的事情"和"实际代码"对不对得上。第一版不做检索，直接读整个项目目录。"""
-    current = ledger.get_current_state(topic_label)
-    want = current["want"]["content"] if current["want"] else "（无记录）"
-    obstacle = current["obstacle"]["content"] if current["obstacle"] else "（无记录）"
+IMPLEMENTATION_BATCH_THRESHOLD = 50  # node数量超过这个才分批，跟compact_history的阈值保持一个数量级
+IMPLEMENTATION_BATCH_SIZE = 20  # 每批大概这么多条决定，不足就并进下一批，但不把同一条关注线拆到两批里
 
-    nodes = compact_history(topic_label, record_type="node")
-    if not nodes:
-        return f"'{topic_label}'目前没有任何node（具体决定）记录，无法做代码比对。"
-    node_text = format_history_by_thread(nodes)
+MERGE_PROMPT = """你收到__COUNT__份独立的代码落地检测报告——每份只检查了"__TOPIC__"这个项目一部分技术决定
+（按关注线分批查的，同一份报告里的决定属于同一批关注线），但都是对照同一份代码/diff做的判断。
 
-    # 优先用Hook攒下来的精确diff（借鉴diff_PR）——只喂"实际变了什么"，不用每次重读整个代码库。
-    # 项目还没接过Hook、或者接了但还没有任何改动记录时，退回到读整个目录兜底。
+请把这些报告合并成一份连贯完整的报告，不要按批次机械罗列，而是：
+1. 相同结论（比如都提到"决定和代码对得上"）可以合并简述，不用逐条重复。
+2. 每一条"未兑现/有落差"的具体发现要保留，连同原报告里引用的文件名/代码片段证据一起带过来，不能丢证据。
+3. 如果不同批次的报告之间出现了看起来矛盾的判断，指出来，不要含糊带过。
+
+用中文回答，不要输出JSON，直接给出可读的合并后报告。
+
+__REPORTS__
+"""
+
+
+def _batch_nodes_by_thread(nodes: list[dict], batch_size: int = IMPLEMENTATION_BATCH_SIZE) -> list[list[dict]]:
+    """按线分组后，尽量凑够batch_size条决定一批，但绝不把同一条关注线拆到两批——
+    拆开会让模型看不到一条线自己的决定序列，判断落地情况时缺上下文。"""
+    by_thread: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for n in nodes:
+        key = n.get("thread_label") or "未分线"
+        if key not in by_thread:
+            by_thread[key] = []
+            order.append(key)
+        by_thread[key].append(n)
+
+    batches: list[list[dict]] = []
+    current: list[dict] = []
+    for key in order:
+        current.extend(by_thread[key])
+        if len(current) >= batch_size:
+            batches.append(current)
+            current = []
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _read_implementation_code(project_path: str) -> str | None:
+    """优先用Hook攒下来的精确diff（借鉴diff_PR）——只喂"实际变了什么"，不用每次重读整个代码库。
+    项目还没接过Hook、或者接了但还没有任何改动记录时，退回到读整个目录兜底。"""
     edits = edit_log.read_edits(project_path)
     if edits:
         code = edit_log.format_edits(edits)
-        code_source_note = f"（以下是{len(edits)}次代码改动的精确diff记录，不是完整代码库）\n"
+        note = f"（以下是{len(edits)}次代码改动的精确diff记录，不是完整代码库）\n"
     else:
         code = read_project_code(project_path)
-        code_source_note = "（Hook还没有积累任何改动记录，以下是读取整个项目目录得到的完整代码）\n"
-    if not code:
-        return f"在'{project_path}'下没有读到任何源码文件，无法比对。"
-    code = code_source_note + code
+        note = "（Hook还没有积累任何改动记录，以下是读取整个项目目录得到的完整代码）\n"
+    return note + code if code else None
 
+
+def _check_implementation_batch(topic_label: str, want: str, obstacle: str, nodes: list[dict], code: str) -> str:
+    node_text = format_history_by_thread(nodes)
     prompt = (
         IMPLEMENTATION_PROMPT.replace("__TOPIC__", topic_label)
         .replace("__WANT__", want)
@@ -300,6 +332,44 @@ def check_implementation(topic_label: str, project_path: str) -> str:
             "content": f"你是一个诚实、不夸大结论的代码复核员，找不到证据就说找不到，不要编。{INJECTION_DEFENSE_NOTE}",
         },
         {"role": "user", "content": prompt},
+    ])
+
+
+def check_implementation(topic_label: str, project_path: str) -> str:
+    """比对"当前决定的事情"和"实际代码"对不对得上。node数量不多时一次查完；数量大了（比如
+    读码机68条）就按关注线分批验证、最后合并——避免决定一多，一次prompt塞太多导致判断被稀释。
+    分批会让代码/diff被重复喂好几遍，是真实的成本代价，不是白拿的免费午餐。"""
+    current = ledger.get_current_state(topic_label)
+    want = current["want"]["content"] if current["want"] else "（无记录）"
+    obstacle = current["obstacle"]["content"] if current["obstacle"] else "（无记录）"
+
+    nodes = compact_history(topic_label, record_type="node")
+    if not nodes:
+        return f"'{topic_label}'目前没有任何node（具体决定）记录，无法做代码比对。"
+
+    code = _read_implementation_code(project_path)
+    if not code:
+        return f"在'{project_path}'下没有读到任何源码文件，无法比对。"
+
+    if len(nodes) <= IMPLEMENTATION_BATCH_THRESHOLD:
+        return _check_implementation_batch(topic_label, want, obstacle, nodes, code)
+
+    batches = _batch_nodes_by_thread(nodes)
+    batch_reports = [
+        _check_implementation_batch(topic_label, want, obstacle, batch, code) for batch in batches
+    ]
+    reports_text = "\n\n".join(f"### 第{i + 1}批报告\n{r}" for i, r in enumerate(batch_reports))
+    merge_prompt = (
+        MERGE_PROMPT.replace("__COUNT__", str(len(batches)))
+        .replace("__TOPIC__", topic_label)
+        .replace("__REPORTS__", wrap_untrusted("BATCH_REPORTS", reports_text))
+    )
+    return call_deepseek([
+        {
+            "role": "system",
+            "content": f"你是一个诚实的报告合并助手，只基于给你的材料合并，不额外编造新证据。{INJECTION_DEFENSE_NOTE}",
+        },
+        {"role": "user", "content": merge_prompt},
     ])
 
 
