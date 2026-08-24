@@ -143,6 +143,46 @@
   .summary-card .empty { color: var(--muted); font-style: italic; font-size: 14px; }
 
   h3.timeline-title { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; margin: 0 0 20px; font-weight: 700; }
+  .threads-count { text-transform: none; font-weight: 500; letter-spacing: 0; color: var(--muted); }
+
+  /* ---------- 关注线 ---------- */
+  #threads-section { margin-bottom: 36px; }
+  #threads-list { max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
+  .thread-row { border-bottom: 1px solid var(--border); }
+  .thread-row:last-child { border-bottom: none; }
+  .thread-head {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer;
+  }
+  .thread-head:hover { background: rgba(255,255,255,0.03); }
+  .thread-type-badge {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; flex-shrink: 0;
+  }
+  .thread-type-badge.want { color: var(--want); background: rgba(138,173,244,0.12); }
+  .thread-type-badge.obstacle { color: var(--obstacle); background: rgba(237,135,150,0.12); }
+  .thread-type-badge.node { color: var(--node); background: rgba(166,218,149,0.12); }
+  .thread-label { font-size: 13.5px; font-weight: 600; flex-shrink: 0; }
+  .thread-status-badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 8px; flex-shrink: 0; font-weight: 600;
+  }
+  .thread-status-badge.resolved { color: var(--node); background: rgba(166,218,149,0.15); }
+  .thread-status-badge.open { color: var(--muted); background: rgba(255,255,255,0.06); }
+  .thread-preview { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  .thread-count { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+  .thread-body { display: none; padding: 4px 14px 14px 40px; }
+  .thread-body.expanded { display: block; }
+  .thread-body-entry { font-size: 12.5px; line-height: 1.7; padding: 6px 0; border-top: 1px dashed var(--border); }
+  .thread-body-entry:first-child { border-top: none; }
+  .thread-body-ts { color: var(--muted); font-size: 11px; margin-right: 8px; }
+  .thread-check-btn {
+    margin-top: 8px; background: transparent; color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+  }
+  .thread-check-btn:hover { background: rgba(198,160,246,0.1); }
+  .thread-check-btn:disabled { opacity: 0.5; cursor: default; }
+  .thread-check-result {
+    margin-top: 10px; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: none;
+  }
   .timeline { position: relative; padding-left: 22px; }
   .timeline::before { content: ""; position: absolute; left: 4px; top: 4px; bottom: 4px; width: 2px; background: var(--border); }
   .entry { position: relative; margin-bottom: 26px; }
@@ -282,6 +322,13 @@
           <div class="label">当前卡点</div>
           <div class="content" id="current-obstacle"></div>
         </div>
+      </div>
+
+      <div id="threads-section" style="display:none">
+        <h3 class="timeline-title">
+          关注线 <span id="threads-count" class="threads-count"></span>
+        </h3>
+        <div id="threads-list"></div>
       </div>
 
       <h3 class="timeline-title">完整历史</h3>
@@ -557,6 +604,8 @@ async function refreshTopicDetail(name, silent) {
   wantEl.innerHTML = data.current.want ? escapeHtml(data.current.want) : '<span class="empty">（无记录）</span>';
   obsEl.innerHTML = data.current.obstacle ? escapeHtml(data.current.obstacle) : '<span class="empty">（无记录）</span>';
 
+  renderThreads(name, data.threads || []);
+
   const timeline = document.getElementById('timeline');
   timeline.innerHTML = '';
   data.history.slice().reverse().forEach(h => {
@@ -574,6 +623,91 @@ async function refreshTopicDetail(name, silent) {
     div.innerHTML = html;
     timeline.appendChild(div);
   });
+}
+
+const TYPE_LABEL = {want: '主线目标', obstacle: '当前卡点', node: '关键节点'};
+
+function renderThreads(topicName, threads) {
+  const section = document.getElementById('threads-section');
+  const countEl = document.getElementById('threads-count');
+  const list = document.getElementById('threads-list');
+  list.innerHTML = '';
+
+  if (!threads.length) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  countEl.textContent = `(${threads.length}条)`;
+
+  threads.forEach(t => {
+    const row = document.createElement('div');
+    row.className = 'thread-row';
+    row.innerHTML = `
+      <div class="thread-head">
+        <span class="thread-type-badge ${t.record_type}">${TYPE_LABEL[t.record_type] || t.record_type}</span>
+        <span class="thread-label">${escapeHtml(t.thread_label)}</span>
+        <span class="thread-status-badge ${t.thread_status}">${t.thread_status === 'resolved' ? '已解决' : '进行中'}</span>
+        <span class="thread-preview">${escapeHtml(t.content)}</span>
+        <span class="thread-count">${t.record_count}条 · ${formatTs(t.source_end_ts)}</span>
+      </div>
+      <div class="thread-body"></div>
+    `;
+    const head = row.querySelector('.thread-head');
+    const body = row.querySelector('.thread-body');
+    head.onclick = () => toggleThread(topicName, t, body);
+    list.appendChild(row);
+  });
+}
+
+async function toggleThread(topicName, thread, bodyEl) {
+  const expanded = bodyEl.classList.contains('expanded');
+  if (expanded) {
+    bodyEl.classList.remove('expanded');
+    return;
+  }
+  bodyEl.classList.add('expanded');
+  if (bodyEl.dataset.loaded) return;
+  bodyEl.dataset.loaded = '1';
+
+  bodyEl.innerHTML = '<div class="thread-body-entry">加载中…</div>';
+  const url = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(thread.thread_label)
+    + '?record_type=' + encodeURIComponent(thread.record_type);
+  const res = await fetch(url);
+  const history = await res.json();
+
+  bodyEl.innerHTML = '';
+  history.forEach(h => {
+    const entry = document.createElement('div');
+    entry.className = 'thread-body-entry';
+    entry.innerHTML = `<span class="thread-body-ts">${formatTs(h.source_end_ts)}</span>${escapeHtml(h.content)}`
+      + (h.reason ? `<div class="entry-reason">理由：${escapeHtml(h.reason)}</div>` : '');
+    bodyEl.appendChild(entry);
+  });
+
+  const checkBtn = document.createElement('button');
+  checkBtn.className = 'thread-check-btn';
+  checkBtn.textContent = '检查这条线有没有矛盾';
+  const resultEl = document.createElement('div');
+  resultEl.className = 'thread-check-result';
+  checkBtn.onclick = async () => {
+    checkBtn.disabled = true;
+    resultEl.style.display = 'block';
+    resultEl.textContent = '正在读这条线的完整历史做判断……';
+    try {
+      const checkUrl = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(thread.thread_label)
+        + '/drift?record_type=' + encodeURIComponent(thread.record_type);
+      const r = await fetch(checkUrl, { method: 'POST' });
+      const data = await r.json();
+      resultEl.textContent = r.ok ? data.result : (data.error || '失败');
+    } catch (e) {
+      resultEl.textContent = '失败：' + e;
+    } finally {
+      checkBtn.disabled = false;
+    }
+  };
+  bodyEl.appendChild(checkBtn);
+  bodyEl.appendChild(resultEl);
 }
 
 async function loadPending(name) {

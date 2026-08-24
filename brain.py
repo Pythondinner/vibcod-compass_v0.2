@@ -242,11 +242,12 @@ def check_drift(topic_label: str) -> str:
     ])
 
 
-def check_thread_drift(topic_label: str, thread_label: str) -> str:
+def check_thread_drift(topic_label: str, thread_label: str, record_type: str | None = None) -> str:
     """只查一条关注线自己的历史有没有前后矛盾——比整个话题的漂移检测聚焦得多，
     适合"我就是想知道这条线有没有问题"这种场景，按需调用，不是每次总览都自动跑一遍。
+    record_type建议传（跟get_threads返回的record_type对应），避免撞名的不同线混在一起。
     """
-    history = ledger.get_thread_history(topic_label, thread_label)
+    history = ledger.get_thread_history(topic_label, thread_label, record_type=record_type)
     if not history:
         return f"'{topic_label}'下没有名为'{thread_label}'的关注线。"
     prompt = DRIFT_PROMPT.replace("__TOPIC__", f"{topic_label} / {thread_label}").replace(

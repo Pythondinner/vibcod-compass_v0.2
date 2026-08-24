@@ -85,7 +85,42 @@ def api_topic_detail(topic_label):
             }
             for h in history
         ],
+        "threads": [
+            {
+                "thread_label": t["thread_label"],
+                "record_type": t["record_type"],
+                "thread_status": t["thread_status"] or "open",
+                "content": t["content"],
+                "source_end_ts": t["source_end_ts"],
+                "record_count": t["record_count"],
+            }
+            for t in sorted(ledger.get_threads(topic_label), key=lambda t: t["source_end_ts"] or "", reverse=True)
+        ],
     })
+
+
+@app.route("/api/topic/<path:topic_label>/thread/<path:thread_label>")
+def api_thread_history(topic_label, thread_label):
+    record_type = request.args.get("record_type")
+    history = ledger.get_thread_history(topic_label, thread_label, record_type=record_type)
+    return jsonify([
+        {
+            "record_type": h["record_type"],
+            "content": h["content"],
+            "reason": h["reason"],
+            "source_end_ts": h["source_end_ts"],
+            "thread_status": h["thread_status"],
+        }
+        for h in history
+    ])
+
+
+@app.route("/api/topic/<path:topic_label>/thread/<path:thread_label>/drift", methods=["POST"])
+def api_thread_drift(topic_label, thread_label):
+    record_type = request.args.get("record_type")
+    result = brain.check_thread_drift(topic_label, thread_label, record_type=record_type)
+    entry = reports.save_report(topic_label, "drift", {"drift": result}, note=f"关注线：{thread_label}")
+    return jsonify({"result": result, "report": entry})
 
 
 @app.route("/api/topic/<path:topic_label>/drift", methods=["POST"])

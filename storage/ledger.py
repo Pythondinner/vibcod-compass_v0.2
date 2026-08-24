@@ -164,30 +164,46 @@ def set_thread(record_ids: list[int], thread_label: str, thread_status: str | No
 
 
 def get_threads(topic_label: str, db_path: str = DB_PATH) -> list[dict]:
-    """这个话题下出现过的所有关注线，每条线取最新一条记录当"当前状态"。"""
+    """这个话题下出现过的所有关注线，每条线取最新一条记录当"当前状态"，附上这条线一共有几条记录。
+    按(record_type, thread_label)分组，不是只按thread_label——want/obstacle/node各自独立起名字，
+    理论上可能撞名（比如want和node都恰好叫"MCP集成"），不能当成同一条线合并。"""
     conn = get_connection(db_path)
-    labels = conn.execute(
-        "SELECT DISTINCT thread_label FROM records WHERE topic_label=? AND thread_label IS NOT NULL",
+    groups = conn.execute(
+        "SELECT record_type, thread_label, COUNT(*) as cnt FROM records "
+        "WHERE topic_label=? AND thread_label IS NOT NULL GROUP BY record_type, thread_label",
         (topic_label,),
     ).fetchall()
     threads = []
-    for row in labels:
+    for row in groups:
         latest = conn.execute(
-            "SELECT * FROM records WHERE topic_label=? AND thread_label=? "
+            "SELECT * FROM records WHERE topic_label=? AND record_type=? AND thread_label=? "
             "ORDER BY source_end_ts DESC, id DESC LIMIT 1",
-            (topic_label, row["thread_label"]),
+            (topic_label, row["record_type"], row["thread_label"]),
         ).fetchone()
-        threads.append(dict(latest))
+        entry = dict(latest)
+        entry["record_count"] = row["cnt"]
+        threads.append(entry)
     conn.close()
     return threads
 
 
-def get_thread_history(topic_label: str, thread_label: str, db_path: str = DB_PATH) -> list[dict]:
+def get_thread_history(
+    topic_label: str, thread_label: str, record_type: str | None = None, db_path: str = DB_PATH
+) -> list[dict]:
+    """record_type建议总是传——want/obstacle/node各自独立起名字，理论上可能撞名，
+    不传record_type会把撞名的不同线混在一起读，跟get_threads的分组逻辑要保持一致。"""
     conn = get_connection(db_path)
-    rows = conn.execute(
-        "SELECT * FROM records WHERE topic_label=? AND thread_label=? ORDER BY source_end_ts ASC, id ASC",
-        (topic_label, thread_label),
-    ).fetchall()
+    if record_type:
+        rows = conn.execute(
+            "SELECT * FROM records WHERE topic_label=? AND thread_label=? AND record_type=? "
+            "ORDER BY source_end_ts ASC, id ASC",
+            (topic_label, thread_label, record_type),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM records WHERE topic_label=? AND thread_label=? ORDER BY source_end_ts ASC, id ASC",
+            (topic_label, thread_label),
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
