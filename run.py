@@ -15,7 +15,7 @@ import analysis
 import observer
 from storage import capture_log, ledger
 
-DEFAULT_N = 5
+DEFAULT_N = 3  # 原来是5,新项目要攒够5条真人消息才第一次冒出来,等待感太强;3条上下文变薄但反馈快很多
 DEFAULT_INTERVAL = 30
 
 

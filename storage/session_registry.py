@@ -36,6 +36,12 @@ def get(project_folder: str) -> dict | None:
     return data.get(os.path.normpath(project_folder))
 
 
+def list_all() -> dict:
+    """全部登记过的项目,配合web.py的后台发现线程用——不能只靠单个project_folder查,
+    发现线程要的是"所有Hook登记过的session都过一遍看看有没有新检查点"。"""
+    return _load()
+
+
 def _load() -> dict:
     if not os.path.exists(REGISTRY_FILE):
         return {}

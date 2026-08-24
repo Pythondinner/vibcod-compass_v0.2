@@ -2,6 +2,8 @@
 不是Executor的报告功能，纯粹是给自己浏览数据用的。
 """
 import os
+import threading
+import time
 
 from flask import Flask, jsonify, render_template, request
 
@@ -14,6 +16,32 @@ from storage import capture_log, ledger, reports, session_registry, topic_paths
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 app = Flask(__name__)
+
+DISCOVERY_INTERVAL = 30  # 秒,跟run.py原来给单项目轮询用的间隔对齐
+
+
+def _discovery_loop():
+    """接上Hook这个动作本身只登记session、抓diff，不会触发提取——一个全新项目、还没有
+    任何话题的时候，网页端原来没有任何东西会主动去处理它，必须手动跑一次run.py才会第一次
+    冒出来，这跟"接上Hook=会被自动监控"的预期不符。这个后台线程补上这个缺口：定期把
+    session_registry里登记过的所有项目各自跑一遍run_once，不用等用户点开某个已存在的话题。
+    没有新检查点时run_once本身很轻(不会真的调模型)，多个来源并发调用run_once现在也安全——
+    今天已经在ledger层加了去重的唯一索引，撞了也只会被忽略,不会插出重复记录。
+    """
+    while True:
+        try:
+            for project_path, entry in session_registry.list_all().items():
+                session_id = entry.get("session_id")
+                transcript_path = entry.get("transcript_path")
+                if not session_id or not transcript_path or not os.path.exists(transcript_path):
+                    continue
+                try:
+                    run_module.run_once(transcript_path, session_id, run_module.DEFAULT_N)
+                except Exception as e:
+                    capture_log.record_failure(session_id, str(e))
+        except Exception:
+            pass  # 后台线程本身绝不能因为任何异常挂掉,不然发现能力就悄悄失效了
+        time.sleep(DISCOVERY_INTERVAL)
 
 
 def clean_path(raw: str) -> str:
@@ -288,6 +316,8 @@ def api_delete_report(report_id):
 
 
 if __name__ == "__main__":
+    threading.Thread(target=_discovery_loop, daemon=True).start()
+
     # use_reloader=False：debug模式默认的自动重载会在源文件变化时重启进程，
     # 如果这时候正好有一个长时间请求(漂移检测/综合复盘)还没跑完，连接会被腰斩，
     # 浏览器端看到的就是"Failed to fetch"——真实踩过这个坑，关掉重载，改代码后手动重启服务器。
