@@ -74,7 +74,8 @@ IMPLEMENTATION_PROMPT = """你是一个诚实的代码复核员，要检查"决�
 - 主线目标：__WANT__
 - 当前卡点：__OBSTACLE__
 
-下面是这条线上做过的具体技术决定（按时间顺序，越靠后越新）：
+下面是做过的具体技术决定。如果按"关注线"分了组，每条线内部按时间顺序排列（越靠后越新）——
+不同线可能是并行推进的不同模块/方向，判断"决定有没有落地"时不用假设它们互相衔接：
 __NODES__
 
 下面是这个项目目前的真实源代码：
@@ -271,12 +272,7 @@ def check_implementation(topic_label: str, project_path: str) -> str:
     nodes = compact_history(topic_label, record_type="node")
     if not nodes:
         return f"'{topic_label}'目前没有任何node（具体决定）记录，无法做代码比对。"
-    node_text = "\n".join(
-        f"[{n['source_end_ts']}] {n['content']}"
-        + (f"（原因：{n['reason']}）" if n["reason"] else "")
-        + (n.get("_compaction_note") or "")
-        for n in nodes
-    )
+    node_text = format_history_by_thread(nodes)
 
     # 优先用Hook攒下来的精确diff（借鉴diff_PR）——只喂"实际变了什么"，不用每次重读整个代码库。
     # 项目还没接过Hook、或者接了但还没有任何改动记录时，退回到读整个目录兜底。

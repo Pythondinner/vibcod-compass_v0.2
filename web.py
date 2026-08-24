@@ -90,6 +90,7 @@ def api_topic_detail(topic_label):
                 "thread_label": t["thread_label"],
                 "record_type": t["record_type"],
                 "thread_status": t["thread_status"] or "open",
+                "stalled": t["stalled"],
                 "content": t["content"],
                 "source_end_ts": t["source_end_ts"],
                 "record_count": t["record_count"],

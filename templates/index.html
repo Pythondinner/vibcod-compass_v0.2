@@ -166,6 +166,7 @@
   }
   .thread-status-badge.resolved { color: var(--node); background: rgba(166,218,149,0.15); }
   .thread-status-badge.open { color: var(--muted); background: rgba(255,255,255,0.06); }
+  .thread-status-badge.stalled { color: var(--obstacle); background: rgba(237,135,150,0.1); }
   .thread-preview { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
   .thread-count { font-size: 11px; color: var(--muted); flex-shrink: 0; }
   .thread-body { display: none; padding: 4px 14px 14px 40px; }
@@ -647,7 +648,7 @@ function renderThreads(topicName, threads) {
       <div class="thread-head">
         <span class="thread-type-badge ${t.record_type}">${TYPE_LABEL[t.record_type] || t.record_type}</span>
         <span class="thread-label">${escapeHtml(t.thread_label)}</span>
-        <span class="thread-status-badge ${t.thread_status}">${t.thread_status === 'resolved' ? '已解决' : '进行中'}</span>
+        <span class="thread-status-badge ${t.stalled ? 'stalled' : t.thread_status}">${t.thread_status === 'resolved' ? '已解决' : (t.stalled ? '已搁置' : '进行中')}</span>
         <span class="thread-preview">${escapeHtml(t.content)}</span>
         <span class="thread-count">${t.record_count}条 · ${formatTs(t.source_end_ts)}</span>
       </div>

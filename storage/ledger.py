@@ -38,7 +38,17 @@ CREATE TABLE IF NOT EXISTS capture_progress (
     last_processed_user_turn_index INTEGER NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_records_dedup
+ON records (topic_label, record_type, content, session_id, source_end_ts);
 """
+# 这个唯一索引是回填/回测时真实撞见的一个bug倒逼加的：run_once()是"读进度->处理->写进度"三步，
+# 中间没有锁，两次几乎同时的调用（比如自动轮询和手动"立即同步"撞在一起）会各自读到同一个旧进度、
+# 各自把同一个checkpoint处理一遍，写进度是幂等的看不出问题，但insert_record在它之前已经真实
+# 插入了两遍完全一样的记录。真实数据里读码机就有一组，时间戳只差8.5毫秒。加索引在数据库层面
+# 堵死这个竞态——判定"重复"的标准是topic_label+record_type+content+session_id+source_end_ts
+# 五个字段完全一样，配合insert_record改成INSERT OR IGNORE，两次并发写只会有一次真正落地，
+# 不需要在应用层加锁。
 
 
 def _now() -> str:
@@ -97,7 +107,7 @@ def insert_record(
 
     if want:
         conn.execute(
-            "INSERT INTO records (record_type, topic_label, content, source_excerpt, source_start_ts, source_end_ts, session_id, created_at, thread_label, thread_status) "
+            "INSERT OR IGNORE INTO records (record_type, topic_label, content, source_excerpt, source_start_ts, source_end_ts, session_id, created_at, thread_label, thread_status) "
             "VALUES ('want', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (topic_label, want, source_excerpt, source_start_ts, source_end_ts, session_id, now, want_thread, want_thread_status),
         )
@@ -105,7 +115,7 @@ def insert_record(
 
     if obstacle:
         conn.execute(
-            "INSERT INTO records (record_type, topic_label, content, source_excerpt, source_start_ts, source_end_ts, session_id, created_at, thread_label, thread_status) "
+            "INSERT OR IGNORE INTO records (record_type, topic_label, content, source_excerpt, source_start_ts, source_end_ts, session_id, created_at, thread_label, thread_status) "
             "VALUES ('obstacle', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (topic_label, obstacle, source_excerpt, source_start_ts, source_end_ts, session_id, now, obstacle_thread, obstacle_thread_status),
         )
@@ -113,7 +123,7 @@ def insert_record(
 
     if node:
         conn.execute(
-            "INSERT INTO records (record_type, topic_label, content, reason, source_excerpt, source_start_ts, source_end_ts, session_id, created_at, thread_label, thread_status) "
+            "INSERT OR IGNORE INTO records (record_type, topic_label, content, reason, source_excerpt, source_start_ts, source_end_ts, session_id, created_at, thread_label, thread_status) "
             "VALUES ('node', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 topic_label,
@@ -163,8 +173,23 @@ def set_thread(record_ids: list[int], thread_label: str, thread_status: str | No
     return changed
 
 
+STALLED_DAYS = 7  # 一条线超过这么多天没有新记录、又没被标resolved，就算"搁置"——纯读取时计算，不存字段
+
+
+def _is_stalled(source_end_ts: str | None, thread_status: str | None) -> bool:
+    if thread_status == "resolved" or not source_end_ts:
+        return False
+    try:
+        last = datetime.fromisoformat(source_end_ts.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (datetime.now(timezone.utc) - last).days >= STALLED_DAYS
+
+
 def get_threads(topic_label: str, db_path: str = DB_PATH) -> list[dict]:
-    """这个话题下出现过的所有关注线，每条线取最新一条记录当"当前状态"，附上这条线一共有几条记录。
+    """这个话题下出现过的所有关注线，每条线取最新一条记录当"当前状态"，附上这条线一共有几条记录，
+    以及是不是"搁置"了（超过STALLED_DAYS天没更新、又没被标resolved——纯读取时计算，不单独存字段，
+    这样阈值以后想调随时能调，不用回填历史数据）。
     按(record_type, thread_label)分组，不是只按thread_label——want/obstacle/node各自独立起名字，
     理论上可能撞名（比如want和node都恰好叫"MCP集成"），不能当成同一条线合并。"""
     conn = get_connection(db_path)
@@ -182,6 +207,7 @@ def get_threads(topic_label: str, db_path: str = DB_PATH) -> list[dict]:
         ).fetchone()
         entry = dict(latest)
         entry["record_count"] = row["cnt"]
+        entry["stalled"] = _is_stalled(entry["source_end_ts"], entry["thread_status"])
         threads.append(entry)
     conn.close()
     return threads
