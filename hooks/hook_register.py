@@ -23,21 +23,16 @@ def main() -> None:
     except (json.JSONDecodeError, ValueError):
         return  # 读不到就算了，不阻塞Claude Code，也不报错吓用户
 
-    try:
-        if payload.get("tool_name"):
-            edit_log.append_from_hook_payload(payload)
-            return
-
-        cwd = payload.get("cwd")
-        transcript_path = payload.get("transcript_path")
-        session_id = payload.get("session_id")
-
-        if cwd and transcript_path and session_id:
-            session_registry.update(cwd, transcript_path, session_id)
-    except Exception:
-        # 这个脚本的唯一职责是"记一笔",不该因为存储层任何异常(文件损坏/权限/磁盘满)
-        # 崩掉整个Hook调用——记不上这一笔不影响Claude Code继续用,静默跳过就好。
+    if payload.get("tool_name"):
+        edit_log.append_from_hook_payload(payload)
         return
+
+    cwd = payload.get("cwd")
+    transcript_path = payload.get("transcript_path")
+    session_id = payload.get("session_id")
+
+    if cwd and transcript_path and session_id:
+        session_registry.update(cwd, transcript_path, session_id)
 
 
 if __name__ == "__main__":

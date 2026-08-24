@@ -1,27 +1,12 @@
 """Brain层：读一个话题从开始到现在的完整历史，判断有没有值得指出的漂移/矛盾，引用证据。
 这是这个项目第一次真正需要"决策"而不只是"提取"的地方——第一版先做最朴素的实现：
 把整个话题的完整历史一次性喂给模型判断。规模一旦变大会不会顶不住，这次就是要拿真实数据测这个。
-
-后续补充：规模确实顶不住了（读码机192条）。第一版试过让模型做检索式筛选（挑出"相关"的
-记录），实测效果不理想——漂移检测/代码落地检测这两个任务本质上是"通读全局做判断"，不是
-"查一个具体问题"，绝大部分记录模型都会判定为"相关"，压缩不动。真正测出来的冗余不是"不相关"，
-是"同一件事被反复记了好几遍"（比如同一个obstacle被记了5次，措辞小变）——所以换成压缩，不是
-筛选：对最近一段时间的记录保持完整原文不动（越新的越关键，不能动），对更早的部分，用确定性
-的文本相似度（不调模型，difflib）把连续出现的近乎重复记录只留首尾、丢掉中间，附一条事实性
-标注说明反复了几次。跟DRIFT_PROMPT要求的"引用具体时间戳和原文内容作为证据"不冲突——保留的
-每一条都是原文，没有被改写过，只是丢了纯重复的部分。
 """
-import difflib
-import json
 import os
 
 from chat import call_deepseek
 from prompt_safety import INJECTION_DEFENSE_NOTE, wrap_untrusted
 from storage import edit_log, ledger
-
-COMPACTION_THRESHOLD = 50  # 历史记录数超过这个才触发压缩,规模小的话题行为完全不变
-RECENT_KEEP = 30  # 最近这么多条,不管压不压缩,一律保持完整原文,不参与去重
-SIMILARITY_THRESHOLD = 0.75  # difflib相似度超过这个才判定为"同一件事的重复"
 
 # 第一版代码比对：不做检索/分块，直接读整个项目目录的源码文件。
 # 大项目会顶不住，先在小项目（这个项目自己）上验证想法能不能走通。
@@ -53,8 +38,7 @@ def read_project_code(project_path: str) -> str:
 DRIFT_PROMPT = """你是一个复盘助手，要检查一个项目从开始到现在的完整记录，判断这个项目的方向有没有出现值得注意的漂移——
 不是自然的演进/推进，而是看起来跟早期的想法产生了矛盾、被悄悄改变了方向、或者早期的一个决定后来被违背了却没有明确说明原因。
 
-下面是"__TOPIC__"这个项目从开始到现在的完整记录（want=当时的目标快照，obstacle=当时的卡点，node=做过的决定及理由）。
-如果记录按"关注线"分了组，每条线内部按时间顺序排列——既要看每条线自己有没有前后矛盾，也要看不同线之间有没有相互冲突（比如推进A线的某个决定，是不是悄悄违背了B线里已经定下的东西）：
+下面是"__TOPIC__"这个项目从开始到现在的完整记录（want=当时的目标快照，obstacle=当时的卡点，node=做过的决定及理由），按时间顺序排列：
 
 __HISTORY__
 
@@ -75,8 +59,7 @@ IMPLEMENTATION_PROMPT = """你是一个诚实的代码复核员，要检查"决�
 - 主线目标：__WANT__
 - 当前卡点：__OBSTACLE__
 
-下面是做过的具体技术决定。如果按"关注线"分了组，每条线内部按时间顺序排列（越靠后越新）——
-不同线可能是并行推进的不同模块/方向，判断"决定有没有落地"时不用假设它们互相衔接：
+下面是这条线上做过的具体技术决定（按时间顺序，越靠后越新）：
 __NODES__
 
 下面是这个项目目前的真实源代码：
@@ -115,144 +98,21 @@ __IMPLEMENTATION__
 """
 
 
-def _similarity(a: str, b: str) -> float:
-    """标准difflib.ratio()按两边总长度算分,遇到"同一句话被逐步补充细节"(短版本是长版本的
-    前缀)时会被长度差惩罚得很低——实测id=133(44字)vs id=138(95字,前面完全一样只是后面加了
-    MCP相关内容)只有0.633分，够不到阈值。改成"包含度"：匹配上的字符数除以较短那条的长度，
-    只要短的那条内容基本都出现在长的里面，就算高相似，不受长度差影响。
-    """
-    sm = difflib.SequenceMatcher(None, a, b)
-    matched = sum(block.size for block in sm.get_matching_blocks())
-    shorter = min(len(a), len(b))
-    return matched / shorter if shorter else 0.0
-
-
-def _flush_run(run: list[dict]) -> list[dict]:
-    """一串连续近乎重复的记录,只留首尾,中间丢掉,附一条事实性标注(不改写原文)。"""
-    if len(run) == 1:
-        return run
-    first, last = dict(run[0]), run[-1]
-    if len(run) > 2:
-        first["_compaction_note"] = (
-            f"（同样内容从{run[0]['source_end_ts']}到{run[-1]['source_end_ts']}"
-            f"反复出现了{len(run)}次，中间{len(run) - 2}次原样省略）"
-        )
-    if last["id"] == first["id"]:
-        return [first]
-    return [first, last]
-
-
-def _compact_stream(records: list[dict], threshold: float = SIMILARITY_THRESHOLD) -> list[dict]:
-    """records是同一个record_type、按时间正序排列的记录。相似度跟"当前这轮最后一条"比，
-    连续超过阈值的算一轮重复；轮次一断就flush，只留首尾。"""
-    if not records:
-        return []
-    result = []
-    run = [records[0]]
-    for rec in records[1:]:
-        similarity = _similarity(run[-1]["content"], rec["content"])
-        if similarity >= threshold:
-            run.append(rec)
-        else:
-            result.extend(_flush_run(run))
-            run = [rec]
-    result.extend(_flush_run(run))
-    return result
-
-
-def compact_history(
-    topic_label: str,
-    record_type: str | None = None,
-    threshold: int = COMPACTION_THRESHOLD,
-    recent_keep: int = RECENT_KEEP,
-) -> list[dict]:
-    """历史记录没超过阈值就整段原样返回,跟改造前行为一致,零风险。超过阈值才压缩：
-    最近recent_keep条一律保留完整原文不参与去重(越新越关键)；更早的部分按record_type
-    分别跑一遍去重(want/obstacle/node各自的时间线分开判重,不跨类型比较)，再按时间合并回来。
-    压缩只丢"确定性判定为近乎重复"的记录，保留的每一条都是原文，没有语义改写风险。
-    """
-    history = ledger.get_history(topic_label, record_type=record_type)
-    if len(history) <= threshold:
-        return history
-
-    old, recent = history[:-recent_keep], history[-recent_keep:]
-
-    by_type: dict[str, list[dict]] = {}
-    for rec in old:
-        by_type.setdefault(rec["record_type"], []).append(rec)
-
-    compacted_old = []
-    for records in by_type.values():
-        compacted_old.extend(_compact_stream(records))
-
-    merged = compacted_old + list(recent)
-    merged.sort(key=lambda h: (h["source_end_ts"] or "", h["id"]))
-    return merged
-
-
 def format_history(history: list[dict]) -> str:
     lines = []
     for h in history:
         line = f"[{h['record_type']}][{h['source_end_ts']}] {h['content']}"
         if h["reason"]:
             line += f"（原因：{h['reason']}）"
-        if h.get("_compaction_note"):
-            line += h["_compaction_note"]
         lines.append(line)
     return "\n".join(lines)
 
 
-def format_history_by_thread(history: list[dict]) -> str:
-    """按关注线分组展示，而不是纯时间平铺——每条线内部保持时间顺序，线与线之间用标题分隔，
-    模型更容易看清"这条线自己有没有矛盾"和"跨线有没有冲突"。没有thread_label的老数据
-    (还没跑过回填)会全部落进同一个桶，这时直接退化成原来的纯时间线格式，不引入多余的
-    "未分线"标题——对没回填过的话题完全零影响。
-    """
-    by_thread: dict[str, list[dict]] = {}
-    order: list[str] = []
-    for h in history:
-        key = h.get("thread_label") or "未分线"
-        if key not in by_thread:
-            by_thread[key] = []
-            order.append(key)
-        by_thread[key].append(h)
-
-    if order == ["未分线"]:
-        return format_history(history)
-
-    sections = []
-    for key in order:
-        items = by_thread[key]
-        status = items[-1].get("thread_status") or "open"
-        sections.append(f"### 关注线：{key}（状态：{status}）\n{format_history(items)}")
-    return "\n\n".join(sections)
-
-
 def check_drift(topic_label: str) -> str:
-    history = compact_history(topic_label)
+    history = ledger.get_history(topic_label)
     if not history:
         return f"没有关于'{topic_label}'的记录。"
     prompt = DRIFT_PROMPT.replace("__TOPIC__", topic_label).replace(
-        "__HISTORY__", wrap_untrusted("HISTORY", format_history_by_thread(history))
-    )
-    return call_deepseek([
-        {
-            "role": "system",
-            "content": f"你是一个诚实、不夸大结论的复盘助手。{INJECTION_DEFENSE_NOTE}",
-        },
-        {"role": "user", "content": prompt},
-    ])
-
-
-def check_thread_drift(topic_label: str, thread_label: str, record_type: str | None = None) -> str:
-    """只查一条关注线自己的历史有没有前后矛盾——比整个话题的漂移检测聚焦得多，
-    适合"我就是想知道这条线有没有问题"这种场景，按需调用，不是每次总览都自动跑一遍。
-    record_type建议传（跟get_threads返回的record_type对应），避免撞名的不同线混在一起。
-    """
-    history = ledger.get_thread_history(topic_label, thread_label, record_type=record_type)
-    if not history:
-        return f"'{topic_label}'下没有名为'{thread_label}'的关注线。"
-    prompt = DRIFT_PROMPT.replace("__TOPIC__", f"{topic_label} / {thread_label}").replace(
         "__HISTORY__", wrap_untrusted("HISTORY", format_history(history))
     )
     return call_deepseek([
@@ -264,62 +124,33 @@ def check_thread_drift(topic_label: str, thread_label: str, record_type: str | N
     ])
 
 
-IMPLEMENTATION_BATCH_THRESHOLD = 50  # node数量超过这个才分批，跟compact_history的阈值保持一个数量级
-IMPLEMENTATION_BATCH_SIZE = 20  # 每批大概这么多条决定，不足就并进下一批，但不把同一条关注线拆到两批里
+def check_implementation(topic_label: str, project_path: str) -> str:
+    """比对"当前决定的事情"和"实际代码"对不对得上。第一版不做检索，直接读整个项目目录。"""
+    current = ledger.get_current_state(topic_label)
+    want = current["want"]["content"] if current["want"] else "（无记录）"
+    obstacle = current["obstacle"]["content"] if current["obstacle"] else "（无记录）"
 
-MERGE_PROMPT = """你收到__COUNT__份独立的代码落地检测报告——每份只检查了"__TOPIC__"这个项目一部分技术决定
-（按关注线分批查的，同一份报告里的决定属于同一批关注线），但都是对照同一份代码/diff做的判断。
+    nodes = ledger.get_history(topic_label, record_type="node")
+    if not nodes:
+        return f"'{topic_label}'目前没有任何node（具体决定）记录，无法做代码比对。"
+    node_text = "\n".join(
+        f"[{n['source_end_ts']}] {n['content']}" + (f"（原因：{n['reason']}）" if n["reason"] else "")
+        for n in nodes
+    )
 
-请把这些报告合并成一份连贯完整的报告，不要按批次机械罗列，而是：
-1. 相同结论（比如都提到"决定和代码对得上"）可以合并简述，不用逐条重复。
-2. 每一条"未兑现/有落差"的具体发现要保留，连同原报告里引用的文件名/代码片段证据一起带过来，不能丢证据。
-3. 如果不同批次的报告之间出现了看起来矛盾的判断，指出来，不要含糊带过。
-
-用中文回答，不要输出JSON，直接给出可读的合并后报告。
-
-__REPORTS__
-"""
-
-
-def _batch_nodes_by_thread(nodes: list[dict], batch_size: int = IMPLEMENTATION_BATCH_SIZE) -> list[list[dict]]:
-    """按线分组后，尽量凑够batch_size条决定一批，但绝不把同一条关注线拆到两批——
-    拆开会让模型看不到一条线自己的决定序列，判断落地情况时缺上下文。"""
-    by_thread: dict[str, list[dict]] = {}
-    order: list[str] = []
-    for n in nodes:
-        key = n.get("thread_label") or "未分线"
-        if key not in by_thread:
-            by_thread[key] = []
-            order.append(key)
-        by_thread[key].append(n)
-
-    batches: list[list[dict]] = []
-    current: list[dict] = []
-    for key in order:
-        current.extend(by_thread[key])
-        if len(current) >= batch_size:
-            batches.append(current)
-            current = []
-    if current:
-        batches.append(current)
-    return batches
-
-
-def _read_implementation_code(project_path: str) -> str | None:
-    """优先用Hook攒下来的精确diff（借鉴diff_PR）——只喂"实际变了什么"，不用每次重读整个代码库。
-    项目还没接过Hook、或者接了但还没有任何改动记录时，退回到读整个目录兜底。"""
+    # 优先用Hook攒下来的精确diff（借鉴diff_PR）——只喂"实际变了什么"，不用每次重读整个代码库。
+    # 项目还没接过Hook、或者接了但还没有任何改动记录时，退回到读整个目录兜底。
     edits = edit_log.read_edits(project_path)
     if edits:
         code = edit_log.format_edits(edits)
-        note = f"（以下是{len(edits)}次代码改动的精确diff记录，不是完整代码库）\n"
+        code_source_note = f"（以下是{len(edits)}次代码改动的精确diff记录，不是完整代码库）\n"
     else:
         code = read_project_code(project_path)
-        note = "（Hook还没有积累任何改动记录，以下是读取整个项目目录得到的完整代码）\n"
-    return note + code if code else None
+        code_source_note = "（Hook还没有积累任何改动记录，以下是读取整个项目目录得到的完整代码）\n"
+    if not code:
+        return f"在'{project_path}'下没有读到任何源码文件，无法比对。"
+    code = code_source_note + code
 
-
-def _check_implementation_batch(topic_label: str, want: str, obstacle: str, nodes: list[dict], code: str) -> str:
-    node_text = format_history_by_thread(nodes)
     prompt = (
         IMPLEMENTATION_PROMPT.replace("__TOPIC__", topic_label)
         .replace("__WANT__", want)
@@ -334,107 +165,6 @@ def _check_implementation_batch(topic_label: str, want: str, obstacle: str, node
         },
         {"role": "user", "content": prompt},
     ])
-
-
-def check_implementation(topic_label: str, project_path: str) -> str:
-    """比对"当前决定的事情"和"实际代码"对不对得上。node数量不多时一次查完；数量大了（比如
-    读码机68条）就按关注线分批验证、最后合并——避免决定一多，一次prompt塞太多导致判断被稀释。
-    分批会让代码/diff被重复喂好几遍，是真实的成本代价，不是白拿的免费午餐。"""
-    current = ledger.get_current_state(topic_label)
-    want = current["want"]["content"] if current["want"] else "（无记录）"
-    obstacle = current["obstacle"]["content"] if current["obstacle"] else "（无记录）"
-
-    nodes = compact_history(topic_label, record_type="node")
-    if not nodes:
-        return f"'{topic_label}'目前没有任何node（具体决定）记录，无法做代码比对。"
-
-    code = _read_implementation_code(project_path)
-    if not code:
-        return f"在'{project_path}'下没有读到任何源码文件，无法比对。"
-
-    if len(nodes) <= IMPLEMENTATION_BATCH_THRESHOLD:
-        return _check_implementation_batch(topic_label, want, obstacle, nodes, code)
-
-    batches = _batch_nodes_by_thread(nodes)
-    batch_reports = [
-        _check_implementation_batch(topic_label, want, obstacle, batch, code) for batch in batches
-    ]
-    reports_text = "\n\n".join(f"### 第{i + 1}批报告\n{r}" for i, r in enumerate(batch_reports))
-    merge_prompt = (
-        MERGE_PROMPT.replace("__COUNT__", str(len(batches)))
-        .replace("__TOPIC__", topic_label)
-        .replace("__REPORTS__", wrap_untrusted("BATCH_REPORTS", reports_text))
-    )
-    return call_deepseek([
-        {
-            "role": "system",
-            "content": f"你是一个诚实的报告合并助手，只基于给你的材料合并，不额外编造新证据。{INJECTION_DEFENSE_NOTE}",
-        },
-        {"role": "user", "content": merge_prompt},
-    ])
-
-
-RESOLVED_SUGGESTION_PROMPT = """以下是一份代码落地检测报告，检查的是"__TOPIC__"这个项目一些关注线的决定有没有真的体现在代码里。
-
-__REPORT__
-
-这个项目目前还在进行中的特点(want)关注线如下，每条附带简短描述：
-__WANT_THREADS__
-
-请你分两部分判断，只依据这份报告本身的内容和上面列出的特点描述，不要自己脑补或者放宽标准：
-
-1. 报告里有没有哪条**决定(node)**关注线，被明确说成"决定和代码完全对得上、没有任何遗留问题"？
-只有报告原文明确表达了这个意思才算——报告里说"部分兑现""无法判断""还有缺口"的不算，报告根本没提到的也不算。
-
-2. 结合报告里已经确认完全兑现的那些决定，上面列出的**特点(want)**关注线里，有没有哪条看起来已经被
-完全覆盖了——报告确认兑现的决定，已经完整覆盖了这条特点描述的全部内容，不再有明显遗留？只有报告内容
-真的支撑这个结论才算，不要因为某一两个决定兑现了就推断整条特点都做完了，特点通常比单个决定范围更大，
-这是两个不同粒度的判断，宁可漏标也不要标错。
-
-只输出JSON：{"resolved_nodes": ["线名1", ...], "resolved_wants": ["线名1", ...]}，没有就输出空数组。
-"""
-
-
-def suggest_resolved_threads(topic_label: str, implementation_report: str) -> list[dict]:
-    """代码落地检测报告生成之后,额外做一次轻量提取——报告里有没有明确说"完全兑现"的node线，
-    以及结合当前还在进行中的want线描述，有没有哪条特点看起来已经被完全覆盖了；有的话作为建议
-    返回给UI(每条带thread_label+record_type)，用户确认了才会真的改thread_status，这里不直接写库。
-    不自动写库的原因：check_implementation本质查的是node(决定)级别的兑现情况，就算是新增的
-    want判断，也只是"结合报告推断"，不是"报告本身就在讨论这条特点"——自动标错比"忘了标"更麻烦，
-    之前当面跟用户对齐过这条，这次want判断的确定性比node更弱，更没有理由破例自动写。
-    这一步只读已经生成的报告文本+当前want线列表，不重新读代码/diff，成本很低。提取失败就返回
-    空列表，不影响主报告本身，建议只是锦上添花。"""
-    want_threads = [
-        {"thread_label": t["thread_label"], "content": t["content"]}
-        for t in ledger.get_threads(topic_label)
-        if t["record_type"] == "want" and t.get("thread_status") != "resolved"
-    ]
-    want_threads_text = (
-        "\n".join(f"- 「{w['thread_label']}」：{w['content']}" for w in want_threads)
-        if want_threads
-        else "（这个项目目前没有还在进行中的特点关注线）"
-    )
-    prompt = (
-        RESOLVED_SUGGESTION_PROMPT.replace("__TOPIC__", topic_label)
-        .replace("__REPORT__", wrap_untrusted("REPORT", implementation_report))
-        .replace("__WANT_THREADS__", wrap_untrusted("WANT_THREADS", want_threads_text))
-    )
-    try:
-        reply = call_deepseek(
-            [
-                {"role": "system", "content": f"你只输出JSON，不输出任何解释。{INJECTION_DEFENSE_NOTE}"},
-                {"role": "user", "content": prompt},
-            ],
-            json_mode=True,
-        )
-        data = json.loads(reply)
-        nodes = [t for t in data.get("resolved_nodes", []) if isinstance(t, str)]
-        wants = [t for t in data.get("resolved_wants", []) if isinstance(t, str)]
-        return [{"thread_label": t, "record_type": "node"} for t in nodes] + [
-            {"thread_label": t, "record_type": "want"} for t in wants
-        ]
-    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
-        return []
 
 
 def synthesize(topic_label: str, project_path: str) -> dict:

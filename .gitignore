@@ -5,8 +5,6 @@ notebook.db
 test_notebook.db
 topic_paths.json
 session_registry.json
-session_registry.json.corrupted-*
-capture_failures.json
 edit_logs/
 reports/
 .claude/settings.json

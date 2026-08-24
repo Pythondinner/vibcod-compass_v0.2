@@ -13,9 +13,9 @@ from pathlib import Path
 
 import analysis
 import observer
-from storage import capture_log, ledger
+from storage import ledger
 
-DEFAULT_N = 3  # 原来是5,新项目要攒够5条真人消息才第一次冒出来,等待感太强;3条上下文变薄但反馈快很多
+DEFAULT_N = 5
 DEFAULT_INTERVAL = 30
 
 
@@ -40,16 +40,12 @@ def run_once(transcript_path: str, session_id: str, n: int) -> int:
             }
             for topic, state in current_state_raw.items()
         }
-        threads_state = {topic: ledger.get_threads(topic) for topic in known_topics}
 
         print(f"[{session_id[:8]}] 检查点(第{end_turn_index}条真人消息)")
         try:
-            records = analysis.extract(
-                window, existing_labels=known_topics, current_state=current_state, threads_state=threads_state
-            )
+            records = analysis.extract(window, existing_labels=known_topics, current_state=current_state)
         except Exception as e:
             print(f"  提取失败: {e}，本检查点跳过，进度不推进，下次重试")
-            capture_log.record_failure(session_id, str(e))
             continue
 
         if not records:
@@ -64,13 +60,6 @@ def run_once(transcript_path: str, session_id: str, n: int) -> int:
                     source_start_ts=window[0]["timestamp"],
                     source_end_ts=window[-1]["timestamp"],
                     session_id=session_id,
-                    want_thread=rec.get("want_thread"),
-                    want_thread_status=rec.get("want_thread_status"),
-                    obstacle_thread=rec.get("obstacle_thread"),
-                    obstacle_thread_status=rec.get("obstacle_thread_status"),
-                    obstacle_related_want_thread=rec.get("obstacle_related_want_thread"),
-                    node_thread=rec.get("node_thread"),
-                    node_thread_status=rec.get("node_thread_status"),
                 )
                 print(f"  [{rec['topic_label']}] 写入了: {inserted}")
 

@@ -121,13 +121,10 @@
   h2 { margin: 0 0 20px; font-size: 24px; }
 
   .pending-box {
-    display: flex; flex-direction: column; gap: 6px;
+    display: flex; align-items: center; justify-content: space-between;
     background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px;
     padding: 10px 16px; margin-bottom: 24px; font-size: 13px; color: var(--muted);
   }
-  .pending-row { display: flex; align-items: center; justify-content: space-between; }
-  #health-line { font-size: 11.5px; display: flex; gap: 14px; }
-  #health-line .warn { color: var(--obstacle); }
   #sync-btn {
     background: transparent; color: var(--want); border: 1px solid var(--want); border-radius: 6px;
     padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
@@ -137,114 +134,15 @@
   #live-dot { color: var(--node); font-size: 9px; animation: live-pulse 1.4s ease-in-out infinite; }
   @keyframes live-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 
-  .summary-box { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 36px; align-items: start; }
+  .summary-box { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 36px; }
   .summary-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 22px 24px; }
-  .summary-card .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 14px; font-weight: 700; }
+  .summary-card .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px; font-weight: 700; }
   .summary-card.want .label { color: var(--want); }
   .summary-card.obstacle .label { color: var(--obstacle); }
+  .summary-card .content { font-size: 16px; line-height: 1.7; color: var(--text); }
   .summary-card .empty { color: var(--muted); font-style: italic; font-size: 14px; }
 
-  /* want:一段一段的特点总结 */
-  .feature-item { margin-bottom: 16px; }
-  .feature-item:last-child { margin-bottom: 0; }
-  .feature-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-  .feature-label { font-size: 12.5px; font-weight: 700; color: var(--want); }
-  .feature-content { font-size: 14.5px; line-height: 1.7; color: var(--text); }
-
-  /* obstacle:堆积式列表,不需要每条都占一整段 */
-  .pile-item {
-    display: flex; align-items: baseline; gap: 8px; padding: 6px 0; font-size: 13.5px; line-height: 1.6;
-    border-top: 1px dashed var(--border);
-  }
-  .pile-item:first-child { border-top: none; padding-top: 0; }
-  .pile-label { font-weight: 700; color: var(--obstacle); flex-shrink: 0; }
-  .pile-content { color: var(--text); flex: 1; min-width: 0; }
-  .pile-link { font-size: 11px; color: var(--muted); }
-
-  /* obstacle关联着的具体want线("消消乐"联动关系的展示,不是新按钮) */
-  .thread-link-badge { font-size: 10.5px; color: var(--muted); flex-shrink: 0; white-space: nowrap; }
-
-  /* 优先级标记:现在做/先放一边,纯用户手动打,AI不参与 */
-  .priority-badge {
-    font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; flex-shrink: 0; white-space: nowrap;
-  }
-  .priority-badge.now { color: var(--obstacle); background: rgba(237,135,150,0.15); }
-  .priority-badge.later { color: var(--muted); background: rgba(255,255,255,0.06); }
-  .priority-controls { display: inline-flex; gap: 4px; flex-shrink: 0; }
-  .priority-btn {
-    font-size: 10px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--border); background: transparent;
-    color: var(--muted); cursor: pointer; white-space: nowrap;
-  }
-  .priority-btn:hover { border-color: var(--accent); color: var(--text); }
-  .priority-btn.active.now { border-color: var(--obstacle); color: var(--obstacle); }
-  .priority-btn.active.later { border-color: var(--muted); color: var(--text); }
-  .priority-reason { font-size: 11px; color: var(--muted); font-style: italic; margin-top: 2px; }
-
-  /* 标记已解决/撤销:故意跟priority-btn区分开一个更显眼的样式,不然两种按钮挤在一起会
-     互相淹没——之前用priority-btn同款样式，10px+透明底+暗边框，实测真的看不清楚。 */
-  .status-toggle-btn {
-    font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap;
-    border: 1px solid var(--node); color: var(--node); background: rgba(166,218,149,0.12);
-  }
-  .status-toggle-btn:hover { background: rgba(166,218,149,0.22); }
-  .status-toggle-btn.undo { border-color: var(--muted); color: var(--muted); background: rgba(255,255,255,0.05); }
-  .status-toggle-btn.undo:hover { color: var(--text); border-color: var(--text); }
-
-  .show-inactive-toggle {
-    display: inline-block; margin-top: 12px; font-size: 11.5px; color: var(--muted); cursor: pointer; text-decoration: underline;
-  }
-  .show-inactive-toggle:hover { color: var(--text); }
-  .inactive-list { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); display: none; }
-  .inactive-list.expanded { display: block; }
-
   h3.timeline-title { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; margin: 0 0 20px; font-weight: 700; }
-  .threads-count { text-transform: none; font-weight: 500; letter-spacing: 0; color: var(--muted); }
-
-  /* ---------- 关注线 ---------- */
-  #threads-section { margin-bottom: 36px; }
-  #threads-filter {
-    width: 100%; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-    padding: 7px 10px; color: var(--text); font-size: 12.5px; margin-bottom: 10px; box-sizing: border-box;
-  }
-  #threads-filter:focus { outline: none; border-color: var(--accent); }
-  #threads-list { max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
-  #threads-empty { padding: 14px; font-size: 12.5px; color: var(--muted); font-style: italic; }
-  .thread-row { border-bottom: 1px solid var(--border); }
-  .thread-row:last-child { border-bottom: none; }
-  .thread-head {
-    display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer;
-  }
-  .thread-head:hover { background: rgba(255,255,255,0.03); }
-  .thread-type-badge {
-    font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; flex-shrink: 0;
-  }
-  .thread-type-badge.want { color: var(--want); background: rgba(138,173,244,0.12); }
-  .thread-type-badge.obstacle { color: var(--obstacle); background: rgba(237,135,150,0.12); }
-  .thread-type-badge.node { color: var(--node); background: rgba(166,218,149,0.12); }
-  .thread-label { font-size: 13.5px; font-weight: 600; flex-shrink: 0; }
-  .thread-status-badge {
-    font-size: 10px; padding: 1px 6px; border-radius: 8px; flex-shrink: 0; font-weight: 600;
-  }
-  .thread-status-badge.resolved { color: var(--node); background: rgba(166,218,149,0.15); }
-  .thread-status-badge.open { color: var(--muted); background: rgba(255,255,255,0.06); }
-  .thread-status-badge.stalled { color: var(--obstacle); background: rgba(237,135,150,0.1); }
-  .thread-preview { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-  .thread-count { font-size: 11px; color: var(--muted); flex-shrink: 0; }
-  .thread-body { display: none; padding: 4px 14px 14px 40px; }
-  .thread-body.expanded { display: block; }
-  .thread-body-entry { font-size: 12.5px; line-height: 1.7; padding: 6px 0; border-top: 1px dashed var(--border); }
-  .thread-body-entry:first-child { border-top: none; }
-  .thread-body-ts { color: var(--muted); font-size: 11px; margin-right: 8px; }
-  .thread-check-btn {
-    margin-top: 8px; background: transparent; color: var(--accent); border: 1px solid var(--accent);
-    border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
-  }
-  .thread-check-btn:hover { background: rgba(198,160,246,0.1); }
-  .thread-check-btn:disabled { opacity: 0.5; cursor: default; }
-  .thread-check-result {
-    margin-top: 10px; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; background: rgba(255,255,255,0.03);
-    border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: none;
-  }
   .timeline { position: relative; padding-left: 22px; }
   .timeline::before { content: ""; position: absolute; left: 4px; top: 4px; bottom: 4px; width: 2px; background: var(--border); }
   .entry { position: relative; margin-bottom: 26px; }
@@ -306,40 +204,6 @@
   }
   .rp-current-result.loading { color: var(--muted); font-style: italic; }
   .rp-current-result strong { color: var(--accent); }
-
-  /* AI从代码落地报告里提取的"建议已解决"清单——只是建议,写库还是要点确认按钮 */
-  #resolve-suggestions {
-    background: rgba(166,218,149,0.06); border: 1px solid rgba(166,218,149,0.2); border-radius: 8px;
-    padding: 10px 12px; margin-bottom: 18px; font-size: 12px;
-  }
-  #resolve-suggestions .suggestions-title { font-weight: 700; color: var(--node); margin-bottom: 8px; }
-  .suggestion-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
-  .suggestion-label { color: var(--text); }
-  .suggestion-confirmed { color: var(--muted); font-style: italic; }
-  .suggestions-confirm-all { display: inline-block; margin-bottom: 8px; }
-
-  /* "消消乐"悬浮提示:标完一条特点已解决之后,问要不要顺便标掉关联的卡点。
-     可能连续累积好几条特点各自的提示(一键确认全部时),所以是position:relative的容器,
-     内部按.cascade-group分段,X按钮固定在容器右上角,不是每段各自一个。 */
-  #cascade-toast {
-    position: fixed; bottom: 24px; right: 24px; width: 320px; max-height: 60vh; overflow-y: auto;
-    background: var(--panel); border: 1px solid rgba(166,218,149,0.35); border-radius: 10px;
-    padding: 32px 16px 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); z-index: 50;
-  }
-  .cascade-close { position: absolute; top: 10px; right: 14px; cursor: pointer; color: var(--muted); font-size: 12px; }
-  .cascade-close:hover { color: var(--text); }
-  .cascade-group + .cascade-group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
-  .cascade-title { font-size: 12.5px; font-weight: 700; color: var(--node); line-height: 1.5; margin-bottom: 10px; }
-  .cascade-row {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 7px 0; border-top: 1px dashed var(--border); font-size: 12px;
-  }
-  .cascade-row-text { color: var(--text); flex: 1; min-width: 0; }
-  .cascade-btn {
-    flex-shrink: 0; background: rgba(166,218,149,0.15); color: var(--node); border: 1px solid var(--node);
-    border-radius: 6px; padding: 3px 9px; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;
-  }
-  .cascade-btn:hover { background: rgba(166,218,149,0.28); }
 
   .rp-history-title { font-size: 13px; color: var(--muted); font-weight: 700; margin: 18px 0 10px; border-top: 1px solid var(--border); padding-top: 16px; }
   .report-item { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
@@ -405,31 +269,19 @@
       <h2 id="detail-title"></h2>
 
       <div id="pending-box" class="pending-box" style="display:none">
-        <div class="pending-row">
-          <span><span id="live-dot" style="display:none">●</span> <span id="pending-text"></span></span>
-          <button id="sync-btn">立即同步</button>
-        </div>
-        <div id="health-line" style="display:none"></div>
+        <span><span id="live-dot" style="display:none">●</span> <span id="pending-text"></span></span>
+        <button id="sync-btn">立即同步</button>
       </div>
 
       <div class="summary-box">
         <div class="summary-card want">
-          <div class="label">主线目标（各特点）</div>
-          <div id="want-features"></div>
+          <div class="label">主线目标</div>
+          <div class="content" id="current-want"></div>
         </div>
         <div class="summary-card obstacle">
-          <div class="label">当前卡点（堆积）</div>
-          <div id="obstacle-pile"></div>
+          <div class="label">当前卡点</div>
+          <div class="content" id="current-obstacle"></div>
         </div>
-      </div>
-
-      <div id="threads-section" style="display:none">
-        <h3 class="timeline-title">
-          关注线 <span id="threads-count" class="threads-count"></span>
-        </h3>
-        <input type="text" id="threads-filter" placeholder="按线名/内容搜索…" style="display:none">
-        <div id="threads-list"></div>
-        <div id="threads-empty" style="display:none">没有匹配的关注线</div>
       </div>
 
       <h3 class="timeline-title">完整历史</h3>
@@ -455,7 +307,6 @@
     </div>
 
     <div class="rp-current-result" id="rp-current-result" style="display:none"></div>
-    <div id="resolve-suggestions" style="display:none"></div>
 
     <div class="rp-history-title">历史报告</div>
     <div id="report-list"></div>
@@ -701,8 +552,10 @@ async function refreshTopicDetail(name, silent) {
   }
   loadPending(name);
 
-  renderSummary(name, data.threads || []);
-  renderThreads(name, data.threads || []);
+  const wantEl = document.getElementById('current-want');
+  const obsEl = document.getElementById('current-obstacle');
+  wantEl.innerHTML = data.current.want ? escapeHtml(data.current.want) : '<span class="empty">（无记录）</span>';
+  obsEl.innerHTML = data.current.obstacle ? escapeHtml(data.current.obstacle) : '<span class="empty">（无记录）</span>';
 
   const timeline = document.getElementById('timeline');
   timeline.innerHTML = '';
@@ -723,450 +576,21 @@ async function refreshTopicDetail(name, silent) {
   });
 }
 
-const TYPE_LABEL = {want: '主线目标', obstacle: '当前卡点', node: '关键节点'};
-
-// ---------- 优先级标记:现在做/先放一边,纯用户手动打,AI不参与判断 ----------
-// 复用在摘要卡片和关注线列表两个地方,所以抽成独立函数,不重复写交互逻辑。
-function renderPriorityControls(container, topicName, thread) {
-  const rt = thread.record_type;
-  const label = thread.thread_label;
-  const priorityUrl = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(label)
-    + '/priority?record_type=' + encodeURIComponent(rt);
-
-  // 优先级同时展示在摘要卡片和关注线列表两个地方,是各自独立渲染的DOM，只改这里持有的
-  // thread对象、只重渲这一个控件的话，另一处不会跟着变——所以改完直接触发一次完整的
-  // refreshTopicDetail，让两处都从服务端最新状态重新渲染，不用自己维护"改了要通知谁"。
-  async function setPriority(priority, reason) {
-    await fetch(priorityUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ priority, reason: reason || '' }),
-    });
-    if (currentTopic) refreshTopicDetail(currentTopic, true);
-  }
-  async function clearPriority() {
-    await fetch(priorityUrl, { method: 'DELETE' });
-    if (currentTopic) refreshTopicDetail(currentTopic, true);
-  }
-
-  function render() {
-    container.innerHTML = '';
-    if (!thread.priority) {
-      const nowBtn = document.createElement('button');
-      nowBtn.className = 'priority-btn';
-      nowBtn.textContent = '现在做';
-      nowBtn.onclick = (e) => { e.stopPropagation(); setPriority('now', null); };
-      const laterBtn = document.createElement('button');
-      laterBtn.className = 'priority-btn';
-      laterBtn.textContent = '先放一边';
-      laterBtn.onclick = (e) => { e.stopPropagation(); setPriority('later', null); };
-      container.appendChild(nowBtn);
-      container.appendChild(laterBtn);
-      return;
-    }
-    const badge = document.createElement('span');
-    badge.className = 'priority-badge ' + thread.priority;
-    badge.textContent = (thread.priority === 'now' ? '现在做' : '先放一边') + ' ✕';
-    badge.title = '点击取消这个标记';
-    badge.onclick = (e) => { e.stopPropagation(); clearPriority(); };
-    container.appendChild(badge);
-    if (thread.priority === 'later' && !thread.priority_reason) {
-      const addReason = document.createElement('span');
-      addReason.className = 'priority-btn';
-      addReason.style.marginLeft = '4px';
-      addReason.textContent = '+备注';
-      addReason.onclick = (e) => {
-        e.stopPropagation();
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.placeholder = '为什么先放一边…';
-        input.style.cssText = 'font-size:11px;width:140px;margin-left:4px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:2px 6px;color:var(--text);';
-        input.onclick = (ev) => ev.stopPropagation();
-        input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); setPriority('later', input.value.trim()); } };
-        input.onblur = () => { if (input.value.trim()) setPriority('later', input.value.trim()); else render(); };
-        container.appendChild(input);
-        input.focus();
-      };
-      container.appendChild(addReason);
-    }
-    if (thread.priority_reason) {
-      const reasonEl = document.createElement('div');
-      reasonEl.className = 'priority-reason';
-      reasonEl.textContent = thread.priority_reason;
-      container.appendChild(reasonEl);
-    }
-  }
-  render();
-}
-
-// ---------- 手动标记已解决:resolved原来只有AI在提取时看到对话明说"解决了"才会标，
-// 大量真实完成是安静的、没人在对话里宣布，会一直卡在"进行中"，这里让用户自己纠正。
-// 跟优先级控件一样复用在摘要卡片和关注线列表两处，改完也是触发完整刷新保证两处同步。
-function renderStatusToggle(container, topicName, thread) {
-  const rt = thread.record_type;
-  const label = thread.thread_label;
-  const statusUrl = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(label)
-    + '/status?record_type=' + encodeURIComponent(rt);
-
-  async function setStatus(status) {
-    const res = await fetch(statusUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (currentTopic) refreshTopicDetail(currentTopic, true);
-    // "消消乐":标resolved的是一条特点(want)、又有关联着它且还没解决的卡点时，
-    // 弹出来问要不要顺便也标掉——只是建议，判断权还是用户的，不自动清。
-    if (status === 'resolved' && rt === 'want' && data.linked_obstacles && data.linked_obstacles.length) {
-      showCascadeToast(topicName, [{ wantLabel: label, obstacles: data.linked_obstacles }]);
-    }
-  }
-
-  function render() {
-    container.innerHTML = '';
-    const isResolved = thread.thread_status === 'resolved';
-    const badge = document.createElement('span');
-    badge.className = 'thread-status-badge ' + (isResolved ? 'resolved' : (thread.stalled ? 'stalled' : 'open'));
-    badge.textContent = isResolved ? '已解决' : (thread.stalled ? '已搁置' : '进行中');
-    container.appendChild(badge);
-
-    const actionBtn = document.createElement('span');
-    actionBtn.className = 'status-toggle-btn' + (isResolved ? ' undo' : '');
-    actionBtn.style.marginLeft = '6px';
-    actionBtn.textContent = isResolved ? '↺ 撤销' : '✓ 标记已解决';
-    actionBtn.onclick = (e) => { e.stopPropagation(); setStatus(isResolved ? 'open' : 'resolved'); };
-    container.appendChild(actionBtn);
-  }
-  render();
-}
-
-// ---------- "消消乐":标掉一条特点后,顺带问要不要标掉关联的卡点 ----------
-// 用悬浮toast而不是就地渲染——就地渲染的容器会被refreshTopicDetail整体重建,
-// 提示会跟着一起消失,悬浮在body上不受那次重渲染影响。
-// groups形如[{wantLabel, obstacles}, ...]——一键确认全部时可能连续标掉好几条特点,
-// 每条都可能各自带关联卡点,所以设计成"追加到同一个toast"而不是每次都整个替换重建,
-// 不然后一条特点的提示会把前一条的顶掉,用户看不到全部。
-function showCascadeToast(topicName, groups) {
-  let box = document.getElementById('cascade-toast');
-  if (!box) {
-    box = document.createElement('div');
-    box.id = 'cascade-toast';
-    const closeBtn = document.createElement('span');
-    closeBtn.className = 'cascade-close';
-    closeBtn.textContent = '✕';
-    closeBtn.onclick = () => box.remove();
-    box.appendChild(closeBtn);
-    document.body.appendChild(box);
-  }
-
-  groups.forEach(({ wantLabel, obstacles }) => {
-    const section = document.createElement('div');
-    section.className = 'cascade-group';
-    const title = document.createElement('div');
-    title.className = 'cascade-title';
-    title.textContent = `特点「${wantLabel}」已标记解决，关联的卡点要不要也一起清掉？`;
-    section.appendChild(title);
-
-    obstacles.forEach(ob => {
-      const row = document.createElement('div');
-      row.className = 'cascade-row';
-      const text = document.createElement('span');
-      text.className = 'cascade-row-text';
-      text.textContent = `${ob.thread_label}：${ob.content}`;
-      const btn = document.createElement('button');
-      btn.className = 'cascade-btn';
-      btn.textContent = '顺便标掉';
-      btn.onclick = async () => {
-        const url = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(ob.thread_label)
-          + '/status?record_type=obstacle';
-        await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'resolved' }),
-        });
-        row.remove();
-        if (currentTopic) refreshTopicDetail(currentTopic, true);
-        if (!section.querySelector('.cascade-row')) section.remove();
-        if (!box.querySelector('.cascade-group')) box.remove();
-      };
-      row.appendChild(text);
-      row.appendChild(btn);
-      section.appendChild(row);
-    });
-
-    box.appendChild(section);
-  });
-}
-
-// ---------- 摘要卡片:want是"一段一段的特点总结",obstacle是"堆积式列表" ----------
-// 只展示"进行中"(非resolved、非搁置)的线,避免摘要区变成又一个完整历史列表；
-// resolved/stalled的折叠在"查看已解决/已搁置"里,默认收起。
-function renderSummary(topicName, threads) {
-  const wantThreads = threads.filter(t => t.record_type === 'want');
-  const obstacleThreads = threads.filter(t => t.record_type === 'obstacle');
-  renderFeatureList(document.getElementById('want-features'), topicName, wantThreads);
-  renderPileList(document.getElementById('obstacle-pile'), topicName, obstacleThreads);
-}
-
-function splitActiveInactive(threads) {
-  const active = threads.filter(t => t.thread_status !== 'resolved' && !t.stalled);
-  const inactive = threads.filter(t => t.thread_status === 'resolved' || t.stalled);
-  return { active, inactive };
-}
-
-function inactiveToggle(container, inactive, buildItem) {
-  if (!inactive.length) return;
-  const toggle = document.createElement('span');
-  toggle.className = 'show-inactive-toggle';
-  toggle.textContent = `查看已解决/已搁置的（${inactive.length}条）`;
-  const list = document.createElement('div');
-  list.className = 'inactive-list';
-  inactive.forEach(t => list.appendChild(buildItem(t)));
-  toggle.onclick = () => {
-    list.classList.toggle('expanded');
-    toggle.textContent = list.classList.contains('expanded')
-      ? '收起已解决/已搁置的'
-      : `查看已解决/已搁置的（${inactive.length}条）`;
-  };
-  container.appendChild(toggle);
-  container.appendChild(list);
-}
-
-function buildFeatureItem(topicName, t) {
-  const item = document.createElement('div');
-  item.className = 'feature-item';
-  const head = document.createElement('div');
-  head.className = 'feature-head';
-  const labelEl = document.createElement('span');
-  labelEl.className = 'feature-label';
-  labelEl.textContent = t.thread_label;
-  const statusCtrl = document.createElement('span');
-  const ctrl = document.createElement('span');
-  ctrl.className = 'priority-controls';
-  head.appendChild(labelEl);
-  head.appendChild(statusCtrl);
-  head.appendChild(ctrl);
-  const content = document.createElement('div');
-  content.className = 'feature-content';
-  content.textContent = t.content;
-  item.appendChild(head);
-  item.appendChild(content);
-  renderStatusToggle(statusCtrl, topicName, t);
-  renderPriorityControls(ctrl, topicName, t);
-  return item;
-}
-
-function renderFeatureList(container, topicName, threads) {
-  container.innerHTML = '';
-  if (!threads.length) {
-    container.innerHTML = '<span class="empty">（无记录）</span>';
-    return;
-  }
-  const { active, inactive } = splitActiveInactive(threads);
-  if (!active.length) {
-    container.innerHTML = '<span class="empty">（当前没有进行中的特点）</span>';
-  } else {
-    active.forEach(t => container.appendChild(buildFeatureItem(topicName, t)));
-  }
-  inactiveToggle(container, inactive, (t) => buildFeatureItem(topicName, t));
-}
-
-function buildPileItem(topicName, t) {
-  const item = document.createElement('div');
-  item.className = 'pile-item';
-  const labelEl = document.createElement('span');
-  labelEl.className = 'pile-label';
-  labelEl.textContent = t.thread_label + '：';
-  const contentEl = document.createElement('span');
-  contentEl.className = 'pile-content';
-  contentEl.textContent = t.content;
-  if (t.related_want_thread) {
-    const linkEl = document.createElement('span');
-    linkEl.className = 'pile-link';
-    linkEl.textContent = '关联特点：' + t.related_want_thread;
-    contentEl.appendChild(document.createElement('br'));
-    contentEl.appendChild(linkEl);
-  }
-  const statusCtrl = document.createElement('span');
-  const ctrl = document.createElement('span');
-  ctrl.className = 'priority-controls';
-  item.appendChild(labelEl);
-  item.appendChild(contentEl);
-  item.appendChild(statusCtrl);
-  item.appendChild(ctrl);
-  renderStatusToggle(statusCtrl, topicName, t);
-  renderPriorityControls(ctrl, topicName, t);
-  return item;
-}
-
-function renderPileList(container, topicName, threads) {
-  container.innerHTML = '';
-  if (!threads.length) {
-    container.innerHTML = '<span class="empty">（无记录）</span>';
-    return;
-  }
-  const { active, inactive } = splitActiveInactive(threads);
-  if (!active.length) {
-    container.innerHTML = '<span class="empty">（当前没有进行中的卡点）</span>';
-  } else {
-    active.forEach(t => container.appendChild(buildPileItem(topicName, t)));
-  }
-  inactiveToggle(container, inactive, (t) => buildPileItem(topicName, t));
-}
-const THREADS_FILTER_THRESHOLD = 15; // 线数超过这个才显示搜索框，少的话滚动一下就看完了，不用额外UI
-let currentThreads = [];
-let currentThreadsTopic = null;
-
-function renderThreads(topicName, threads) {
-  currentThreads = threads;
-  currentThreadsTopic = topicName;
-  const section = document.getElementById('threads-section');
-  const filterInput = document.getElementById('threads-filter');
-
-  if (!threads.length) {
-    section.style.display = 'none';
-    return;
-  }
-  section.style.display = 'block';
-  filterInput.style.display = threads.length > THREADS_FILTER_THRESHOLD ? 'block' : 'none';
-  filterInput.value = '';
-  renderThreadRows(topicName, threads);
-}
-
-function renderThreadRows(topicName, threads) {
-  const countEl = document.getElementById('threads-count');
-  const list = document.getElementById('threads-list');
-  const emptyEl = document.getElementById('threads-empty');
-  list.innerHTML = '';
-  countEl.textContent = `(${threads.length}/${currentThreads.length}条)`;
-
-  if (!threads.length) {
-    list.style.display = 'none';
-    emptyEl.style.display = 'block';
-    return;
-  }
-  list.style.display = 'block';
-  emptyEl.style.display = 'none';
-
-  threads.forEach(t => {
-    const row = document.createElement('div');
-    row.className = 'thread-row';
-    row.innerHTML = `
-      <div class="thread-head">
-        <span class="thread-type-badge ${t.record_type}">${TYPE_LABEL[t.record_type] || t.record_type}</span>
-        <span class="thread-label">${escapeHtml(t.thread_label)}</span>
-        ${t.related_want_thread ? `<span class="thread-link-badge">→ ${escapeHtml(t.related_want_thread)}</span>` : ''}
-        <span class="thread-status-toggle"></span>
-        <span class="priority-controls thread-priority-controls"></span>
-        <span class="thread-preview">${escapeHtml(t.content)}</span>
-        <span class="thread-count">${t.record_count}条 · ${formatTs(t.source_end_ts)}</span>
-      </div>
-      <div class="thread-body"></div>
-    `;
-    const head = row.querySelector('.thread-head');
-    const body = row.querySelector('.thread-body');
-    const statusCtrl = row.querySelector('.thread-status-toggle');
-    const priorityCtrl = row.querySelector('.thread-priority-controls');
-    renderStatusToggle(statusCtrl, topicName, t);
-    renderPriorityControls(priorityCtrl, topicName, t);
-    head.onclick = () => toggleThread(topicName, t, body);
-    list.appendChild(row);
-  });
-}
-
-document.getElementById('threads-filter').addEventListener('input', (e) => {
-  const q = e.target.value.trim().toLowerCase();
-  const filtered = q
-    ? currentThreads.filter(t => t.thread_label.toLowerCase().includes(q) || t.content.toLowerCase().includes(q))
-    : currentThreads;
-  renderThreadRows(currentThreadsTopic, filtered);
-});
-
-async function toggleThread(topicName, thread, bodyEl) {
-  const expanded = bodyEl.classList.contains('expanded');
-  if (expanded) {
-    bodyEl.classList.remove('expanded');
-    return;
-  }
-  bodyEl.classList.add('expanded');
-  if (bodyEl.dataset.loaded) return;
-  bodyEl.dataset.loaded = '1';
-
-  bodyEl.innerHTML = '<div class="thread-body-entry">加载中…</div>';
-  const url = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(thread.thread_label)
-    + '?record_type=' + encodeURIComponent(thread.record_type);
-  const res = await fetch(url);
-  const history = await res.json();
-
-  bodyEl.innerHTML = '';
-  history.forEach(h => {
-    const entry = document.createElement('div');
-    entry.className = 'thread-body-entry';
-    entry.innerHTML = `<span class="thread-body-ts">${formatTs(h.source_end_ts)}</span>${escapeHtml(h.content)}`
-      + (h.reason ? `<div class="entry-reason">理由：${escapeHtml(h.reason)}</div>` : '');
-    bodyEl.appendChild(entry);
-  });
-
-  const checkBtn = document.createElement('button');
-  checkBtn.className = 'thread-check-btn';
-  checkBtn.textContent = '检查这条线有没有矛盾';
-  const resultEl = document.createElement('div');
-  resultEl.className = 'thread-check-result';
-  checkBtn.onclick = async () => {
-    checkBtn.disabled = true;
-    resultEl.style.display = 'block';
-    resultEl.textContent = '正在读这条线的完整历史做判断……';
-    try {
-      const checkUrl = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(thread.thread_label)
-        + '/drift?record_type=' + encodeURIComponent(thread.record_type);
-      const r = await fetch(checkUrl, { method: 'POST' });
-      const data = await r.json();
-      resultEl.textContent = r.ok ? data.result : (data.error || '失败');
-    } catch (e) {
-      resultEl.textContent = '失败：' + e;
-    } finally {
-      checkBtn.disabled = false;
-    }
-  };
-  bodyEl.appendChild(checkBtn);
-  bodyEl.appendChild(resultEl);
-}
-
 async function loadPending(name) {
   const box = document.getElementById('pending-box');
-  const pendingRow = document.querySelector('#pending-box .pending-row');
   const text = document.getElementById('pending-text');
-  const healthLine = document.getElementById('health-line');
   const res = await fetch('/api/topic/' + encodeURIComponent(name) + '/pending');
   const data = await res.json();
-
-  if (data.available) {
-    pendingRow.style.display = 'flex';
-    if (data.new_user_turns === 0 && data.new_edits === 0) {
-      text.textContent = '已经是最新的，没有待同步的内容';
-    } else {
-      text.textContent = `自上次同步以来：${data.new_user_turns}条新消息，${data.new_edits}次代码改动`;
-    }
+  if (!data.available) {
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = 'flex';
+  if (data.new_user_turns === 0 && data.new_edits === 0) {
+    text.textContent = '已经是最新的，没有待同步的内容';
   } else {
-    pendingRow.style.display = 'none';
+    text.textContent = `自上次同步以来：${data.new_user_turns}条新消息，${data.new_edits}次代码改动`;
   }
-
-  const parts = [];
-  if (data.recent_failure_count > 0) {
-    parts.push(`<span class="warn">最近24小时提取失败${data.recent_failure_count}次${data.last_failure ? '（最近一次：' + escapeHtml(data.last_failure.error.slice(0, 40)) + '…）' : ''}</span>`);
-  }
-  if (data.hook_last_seen) {
-    parts.push(`Hook上次活跃：${formatTs(data.hook_last_seen)}`);
-  }
-  if (parts.length) {
-    healthLine.innerHTML = parts.join('');
-    healthLine.style.display = 'flex';
-  } else {
-    healthLine.style.display = 'none';
-  }
-
-  box.style.display = (data.available || parts.length) ? 'flex' : 'none';
 }
 
 document.getElementById('sync-btn').onclick = async () => {
@@ -1243,7 +667,6 @@ async function runReport(kind) {
   const errorEl = document.getElementById('rp-error');
   const result = document.getElementById('rp-current-result');
   errorEl.style.display = 'none';
-  document.getElementById('resolve-suggestions').style.display = 'none';
 
   const needsPath = kind !== 'drift';
   if (needsPath && !path) {
@@ -1278,7 +701,6 @@ async function runReport(kind) {
       result.className = 'rp-current-result';
       result.innerHTML = simpleMarkdown(kind === 'synthesis' ? data.synthesis : data.result);
       loadReports(currentTopic);
-      renderResolveSuggestions(kind === 'implementation' ? (data.suggested_resolved_threads || []) : []);
     }
   } catch (e) {
     result.style.display = 'none';
@@ -1286,81 +708,6 @@ async function runReport(kind) {
     errorEl.style.display = 'block';
   } finally {
     btns.forEach(b => b.disabled = false);
-  }
-}
-
-// 单条建议的确认逻辑抽成独立函数——单条按钮和"一键确认全部"复用同一份逻辑，
-// 不重复写"POST状态、拿linked_obstacles、判断要不要弹消消乐提示"这一整套。
-async function confirmSuggestion(s, row) {
-  const url = '/api/topic/' + encodeURIComponent(currentTopic) + '/thread/' + encodeURIComponent(s.thread_label)
-    + '/status?record_type=' + encodeURIComponent(s.record_type);
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'resolved' }),
-  });
-  const data = await res.json().catch(() => ({}));
-  const typeLabel = TYPE_LABEL[s.record_type] || s.record_type;
-  row.dataset.confirmed = '1';
-  row.innerHTML = '';
-  const confirmed = document.createElement('span');
-  confirmed.className = 'suggestion-confirmed';
-  confirmed.textContent = `[${typeLabel}] ${s.thread_label}（已确认标记）`;
-  row.appendChild(confirmed);
-  if (s.record_type === 'want' && data.linked_obstacles && data.linked_obstacles.length) {
-    showCascadeToast(currentTopic, [{ wantLabel: s.thread_label, obstacles: data.linked_obstacles }]);
-  }
-}
-
-function renderResolveSuggestions(suggestions) {
-  const box = document.getElementById('resolve-suggestions');
-  box.innerHTML = '';
-  if (!suggestions.length) {
-    box.style.display = 'none';
-    return;
-  }
-  box.style.display = 'block';
-  const title = document.createElement('div');
-  title.className = 'suggestions-title';
-  title.textContent = `AI从这份报告里找到 ${suggestions.length} 条看起来已经完全兑现的关注线，确认了才会真的改状态：`;
-  box.appendChild(title);
-
-  const rows = [];
-  suggestions.forEach(s => {
-    const row = document.createElement('div');
-    row.className = 'suggestion-row';
-    const typeLabel = TYPE_LABEL[s.record_type] || s.record_type;
-    const labelEl = document.createElement('span');
-    labelEl.className = 'suggestion-label';
-    labelEl.textContent = `[${typeLabel}] ${s.thread_label}`;
-    const confirmBtn = document.createElement('span');
-    confirmBtn.className = 'status-toggle-btn';
-    confirmBtn.textContent = '✓ 确认标记已解决';
-    confirmBtn.onclick = () => {
-      confirmBtn.style.pointerEvents = 'none';
-      confirmSuggestion(s, row).then(() => refreshTopicDetail(currentTopic, true));
-    };
-    row.appendChild(labelEl);
-    row.appendChild(confirmBtn);
-    box.appendChild(row);
-    rows.push({ s, row });
-  });
-
-  if (suggestions.length > 1) {
-    const allBtn = document.createElement('span');
-    allBtn.className = 'status-toggle-btn suggestions-confirm-all';
-    allBtn.textContent = `✓ 一键确认全部（${suggestions.length}条）`;
-    allBtn.onclick = async () => {
-      allBtn.style.pointerEvents = 'none';
-      allBtn.textContent = '确认中…';
-      for (const { s, row } of rows) {
-        if (row.dataset.confirmed === '1') continue; // 已经被单独确认过的行跳过
-        await confirmSuggestion(s, row);
-      }
-      allBtn.remove();
-      refreshTopicDetail(currentTopic, true);
-    };
-    box.insertBefore(allBtn, box.firstChild.nextSibling);
   }
 }
 
