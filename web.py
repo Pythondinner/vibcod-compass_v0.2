@@ -91,13 +91,8 @@ def api_topics():
 
 @app.route("/api/topic/<path:topic_label>")
 def api_topic_detail(topic_label):
-    current = ledger.get_current_state(topic_label)
     history = ledger.get_history(topic_label)
     return jsonify({
-        "current": {
-            "want": current["want"]["content"] if current["want"] else None,
-            "obstacle": current["obstacle"]["content"] if current["obstacle"] else None,
-        },
         "project_path": topic_paths.get_path(topic_label),
         "hook_attached": (
             hook_setup.is_attached(topic_paths.get_path(topic_label))
@@ -119,6 +114,8 @@ def api_topic_detail(topic_label):
                 "record_type": t["record_type"],
                 "thread_status": t["thread_status"] or "open",
                 "stalled": t["stalled"],
+                "priority": t["priority"],
+                "priority_reason": t["priority_reason"],
                 "content": t["content"],
                 "source_end_ts": t["source_end_ts"],
                 "record_count": t["record_count"],
@@ -150,6 +147,24 @@ def api_thread_drift(topic_label, thread_label):
     result = brain.check_thread_drift(topic_label, thread_label, record_type=record_type)
     entry = reports.save_report(topic_label, "drift", {"drift": result}, note=f"关注线：{thread_label}")
     return jsonify({"result": result, "report": entry})
+
+
+@app.route("/api/topic/<path:topic_label>/thread/<path:thread_label>/priority", methods=["POST", "DELETE"])
+def api_thread_priority(topic_label, thread_label):
+    record_type = request.args.get("record_type")
+    if not record_type:
+        return jsonify({"error": "缺少record_type"}), 400
+
+    if request.method == "DELETE":
+        ledger.clear_thread_priority(topic_label, record_type, thread_label)
+        return jsonify({"ok": True})
+
+    body = request.get_json(silent=True) or {}
+    priority = body.get("priority")
+    if priority not in ("now", "later"):
+        return jsonify({"error": "priority只能是'now'或'later'"}), 400
+    ledger.set_thread_priority(topic_label, record_type, thread_label, priority, reason=body.get("reason") or None)
+    return jsonify({"ok": True})
 
 
 @app.route("/api/topic/<path:topic_label>/drift", methods=["POST"])

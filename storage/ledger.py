@@ -41,7 +41,21 @@ CREATE TABLE IF NOT EXISTS capture_progress (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_records_dedup
 ON records (topic_label, record_type, content, session_id, source_end_ts);
+
+CREATE TABLE IF NOT EXISTS thread_priorities (
+    topic_label TEXT NOT NULL,
+    record_type TEXT NOT NULL,
+    thread_label TEXT NOT NULL,
+    priority TEXT NOT NULL CHECK(priority IN ('now', 'later')),
+    reason TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (topic_label, record_type, thread_label)
+);
 """
+# thread_priorities故意没放进records表——优先级是用户手动打的标记，不是从对话里提取出来的
+# 事实，跟着records的"只增不减"逻辑走会很别扭（改优先级=插一条新记录，会让线的历史时间线
+# 里混进"用户点了个按钮"这种噪音，跟真实内容混在一起）。独立一张表，一条线一行，可以直接
+# 覆盖更新，不需要保留"优先级改过几次"这种历史。
 # 这个唯一索引是回填/回测时真实撞见的一个bug倒逼加的：run_once()是"读进度->处理->写进度"三步，
 # 中间没有锁，两次几乎同时的调用（比如自动轮询和手动"立即同步"撞在一起）会各自读到同一个旧进度、
 # 各自把同一个checkpoint处理一遍，写进度是幂等的看不出问题，但insert_record在它之前已经真实
@@ -186,10 +200,37 @@ def _is_stalled(source_end_ts: str | None, thread_status: str | None) -> bool:
     return (datetime.now(timezone.utc) - last).days >= STALLED_DAYS
 
 
+def set_thread_priority(
+    topic_label: str, record_type: str, thread_label: str, priority: str, reason: str | None = None, db_path: str = DB_PATH
+) -> None:
+    """用户手动给一条线打优先级标记——只有'now'/'later'两档，不做更多级别，AI不参与判断，
+    纯粹是用户自己点。覆盖写,不保留"改过几次优先级"这种历史,跟records的只增不减是两回事。"""
+    conn = get_connection(db_path)
+    conn.execute(
+        "INSERT INTO thread_priorities (topic_label, record_type, thread_label, priority, reason, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(topic_label, record_type, thread_label) DO UPDATE SET "
+        "priority=excluded.priority, reason=excluded.reason, updated_at=excluded.updated_at",
+        (topic_label, record_type, thread_label, priority, reason, _now()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def clear_thread_priority(topic_label: str, record_type: str, thread_label: str, db_path: str = DB_PATH) -> None:
+    conn = get_connection(db_path)
+    conn.execute(
+        "DELETE FROM thread_priorities WHERE topic_label=? AND record_type=? AND thread_label=?",
+        (topic_label, record_type, thread_label),
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_threads(topic_label: str, db_path: str = DB_PATH) -> list[dict]:
     """这个话题下出现过的所有关注线，每条线取最新一条记录当"当前状态"，附上这条线一共有几条记录，
-    以及是不是"搁置"了（超过STALLED_DAYS天没更新、又没被标resolved——纯读取时计算，不单独存字段，
-    这样阈值以后想调随时能调，不用回填历史数据）。
+    是不是"搁置"了（超过STALLED_DAYS天没更新、又没被标resolved——纯读取时计算，不单独存字段，
+    这样阈值以后想调随时能调，不用回填历史数据），以及用户有没有手动打过优先级标记。
     按(record_type, thread_label)分组，不是只按thread_label——want/obstacle/node各自独立起名字，
     理论上可能撞名（比如want和node都恰好叫"MCP集成"），不能当成同一条线合并。"""
     conn = get_connection(db_path)
@@ -205,9 +246,15 @@ def get_threads(topic_label: str, db_path: str = DB_PATH) -> list[dict]:
             "ORDER BY source_end_ts DESC, id DESC LIMIT 1",
             (topic_label, row["record_type"], row["thread_label"]),
         ).fetchone()
+        priority_row = conn.execute(
+            "SELECT priority, reason FROM thread_priorities WHERE topic_label=? AND record_type=? AND thread_label=?",
+            (topic_label, row["record_type"], row["thread_label"]),
+        ).fetchone()
         entry = dict(latest)
         entry["record_count"] = row["cnt"]
         entry["stalled"] = _is_stalled(entry["source_end_ts"], entry["thread_status"])
+        entry["priority"] = priority_row["priority"] if priority_row else None
+        entry["priority_reason"] = priority_row["reason"] if priority_row else None
         threads.append(entry)
     conn.close()
     return threads
