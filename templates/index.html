@@ -303,6 +303,16 @@
   .rp-current-result.loading { color: var(--muted); font-style: italic; }
   .rp-current-result strong { color: var(--accent); }
 
+  /* AI从代码落地报告里提取的"建议已解决"清单——只是建议,写库还是要点确认按钮 */
+  #resolve-suggestions {
+    background: rgba(166,218,149,0.06); border: 1px solid rgba(166,218,149,0.2); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 18px; font-size: 12px;
+  }
+  #resolve-suggestions .suggestions-title { font-weight: 700; color: var(--node); margin-bottom: 8px; }
+  .suggestion-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
+  .suggestion-label { color: var(--text); }
+  .suggestion-confirmed { color: var(--muted); font-style: italic; }
+
   .rp-history-title { font-size: 13px; color: var(--muted); font-weight: 700; margin: 18px 0 10px; border-top: 1px solid var(--border); padding-top: 16px; }
   .report-item { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
   .report-item-head { display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
@@ -417,6 +427,7 @@
     </div>
 
     <div class="rp-current-result" id="rp-current-result" style="display:none"></div>
+    <div id="resolve-suggestions" style="display:none"></div>
 
     <div class="rp-history-title">历史报告</div>
     <div id="report-list"></div>
@@ -1132,6 +1143,7 @@ async function runReport(kind) {
   const errorEl = document.getElementById('rp-error');
   const result = document.getElementById('rp-current-result');
   errorEl.style.display = 'none';
+  document.getElementById('resolve-suggestions').style.display = 'none';
 
   const needsPath = kind !== 'drift';
   if (needsPath && !path) {
@@ -1166,6 +1178,7 @@ async function runReport(kind) {
       result.className = 'rp-current-result';
       result.innerHTML = simpleMarkdown(kind === 'synthesis' ? data.synthesis : data.result);
       loadReports(currentTopic);
+      renderResolveSuggestions(kind === 'implementation' ? (data.suggested_resolved_threads || []) : []);
     }
   } catch (e) {
     result.style.display = 'none';
@@ -1174,6 +1187,49 @@ async function runReport(kind) {
   } finally {
     btns.forEach(b => b.disabled = false);
   }
+}
+
+function renderResolveSuggestions(suggestions) {
+  const box = document.getElementById('resolve-suggestions');
+  box.innerHTML = '';
+  if (!suggestions.length) {
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = 'block';
+  const title = document.createElement('div');
+  title.className = 'suggestions-title';
+  title.textContent = `AI从这份报告里找到 ${suggestions.length} 条看起来已经完全兑现的关注线，确认了才会真的改状态：`;
+  box.appendChild(title);
+
+  suggestions.forEach(s => {
+    const row = document.createElement('div');
+    row.className = 'suggestion-row';
+    const labelEl = document.createElement('span');
+    labelEl.className = 'suggestion-label';
+    labelEl.textContent = s.thread_label;
+    const confirmBtn = document.createElement('span');
+    confirmBtn.className = 'status-toggle-btn';
+    confirmBtn.textContent = '✓ 确认标记已解决';
+    confirmBtn.onclick = async () => {
+      const url = '/api/topic/' + encodeURIComponent(currentTopic) + '/thread/' + encodeURIComponent(s.thread_label)
+        + '/status?record_type=' + encodeURIComponent(s.record_type);
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'resolved' }),
+      });
+      row.innerHTML = '';
+      const confirmed = document.createElement('span');
+      confirmed.className = 'suggestion-confirmed';
+      confirmed.textContent = s.thread_label + '（已确认标记）';
+      row.appendChild(confirmed);
+      refreshTopicDetail(currentTopic, true);
+    };
+    row.appendChild(labelEl);
+    row.appendChild(confirmBtn);
+    box.appendChild(row);
+  });
 }
 
 document.getElementById('synth-btn').onclick = () => runReport('synthesis');

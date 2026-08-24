@@ -203,7 +203,12 @@ def api_topic_implementation(topic_label):
     topic_paths.set_path(topic_label, project_path)
     result = brain.check_implementation(topic_label, project_path)
     entry = reports.save_report(topic_label, "implementation", {"implementation": result})
-    return jsonify({"result": result, "report": entry})
+    suggested = brain.suggest_resolved_threads(topic_label, result)
+    return jsonify({
+        "result": result,
+        "report": entry,
+        "suggested_resolved_threads": [{"thread_label": t, "record_type": "node"} for t in suggested],
+    })
 
 
 def _health_fields(topic_label: str, session_id: str | None) -> dict:

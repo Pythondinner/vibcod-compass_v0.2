@@ -12,6 +12,7 @@
 每一条都是原文，没有被改写过，只是丢了纯重复的部分。
 """
 import difflib
+import json
 import os
 
 from chat import call_deepseek
@@ -371,6 +372,42 @@ def check_implementation(topic_label: str, project_path: str) -> str:
         },
         {"role": "user", "content": merge_prompt},
     ])
+
+
+RESOLVED_SUGGESTION_PROMPT = """以下是一份代码落地检测报告，检查的是"__TOPIC__"这个项目一些关注线的决定有没有真的体现在代码里。
+
+__REPORT__
+
+请你只根据这份报告本身的内容判断：报告里有没有哪条关注线，被明确说成"决定和代码完全对得上、没有任何遗留问题"？
+只有报告原文明确表达了这个意思才算，不要自己脑补或者放宽标准——报告里说"部分兑现""无法判断""还有缺口"的
+关注线都不算，报告根本没提到的关注线也不算。
+
+只输出JSON：{"resolved_threads": ["线名1", "线名2", ...]}，一条都没有就输出{"resolved_threads": []}。
+"""
+
+
+def suggest_resolved_threads(topic_label: str, implementation_report: str) -> list[str]:
+    """代码落地检测报告生成之后,额外做一次轻量提取——报告里有没有明确说"完全兑现"的关注线，
+    有的话作为建议返回给UI，用户确认了才会真的改thread_status，这里不直接写库。
+    不自动写库的原因：check_implementation查的是node(决定)级别的兑现情况，不代表整条线
+    (可能还有obstacle没解决)就该收尾——自动标错比"忘了标"更麻烦，之前当面跟用户对齐过这条。
+    这一步只读已经生成的报告文本，不重新读代码/diff，成本很低。提取失败就返回空列表，
+    不影响主报告本身，建议只是锦上添花。"""
+    prompt = RESOLVED_SUGGESTION_PROMPT.replace("__TOPIC__", topic_label).replace(
+        "__REPORT__", wrap_untrusted("REPORT", implementation_report)
+    )
+    try:
+        reply = call_deepseek(
+            [
+                {"role": "system", "content": f"你只输出JSON，不输出任何解释。{INJECTION_DEFENSE_NOTE}"},
+                {"role": "user", "content": prompt},
+            ],
+            json_mode=True,
+        )
+        threads = json.loads(reply).get("resolved_threads", [])
+        return [t for t in threads if isinstance(t, str)]
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
+        return []
 
 
 def synthesize(topic_label: str, project_path: str) -> dict:
