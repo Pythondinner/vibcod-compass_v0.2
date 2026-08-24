@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+notebook.db
+test_notebook.db
+topic_paths.json
+session_registry.json
+edit_logs/
+reports/
+.claude/settings.json
+.venv/
+test_analysis.py
+test_label_fix.py
+工程日志/
+test_ledger.py
