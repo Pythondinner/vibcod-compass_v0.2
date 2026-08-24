@@ -121,10 +121,13 @@
   h2 { margin: 0 0 20px; font-size: 24px; }
 
   .pending-box {
-    display: flex; align-items: center; justify-content: space-between;
+    display: flex; flex-direction: column; gap: 6px;
     background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px;
     padding: 10px 16px; margin-bottom: 24px; font-size: 13px; color: var(--muted);
   }
+  .pending-row { display: flex; align-items: center; justify-content: space-between; }
+  #health-line { font-size: 11.5px; display: flex; gap: 14px; }
+  #health-line .warn { color: var(--obstacle); }
   #sync-btn {
     background: transparent; color: var(--want); border: 1px solid var(--want); border-radius: 6px;
     padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
@@ -147,7 +150,13 @@
 
   /* ---------- 关注线 ---------- */
   #threads-section { margin-bottom: 36px; }
+  #threads-filter {
+    width: 100%; background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px 10px; color: var(--text); font-size: 12.5px; margin-bottom: 10px; box-sizing: border-box;
+  }
+  #threads-filter:focus { outline: none; border-color: var(--accent); }
   #threads-list { max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
+  #threads-empty { padding: 14px; font-size: 12.5px; color: var(--muted); font-style: italic; }
   .thread-row { border-bottom: 1px solid var(--border); }
   .thread-row:last-child { border-bottom: none; }
   .thread-head {
@@ -310,8 +319,11 @@
       <h2 id="detail-title"></h2>
 
       <div id="pending-box" class="pending-box" style="display:none">
-        <span><span id="live-dot" style="display:none">●</span> <span id="pending-text"></span></span>
-        <button id="sync-btn">立即同步</button>
+        <div class="pending-row">
+          <span><span id="live-dot" style="display:none">●</span> <span id="pending-text"></span></span>
+          <button id="sync-btn">立即同步</button>
+        </div>
+        <div id="health-line" style="display:none"></div>
       </div>
 
       <div class="summary-box">
@@ -329,7 +341,9 @@
         <h3 class="timeline-title">
           关注线 <span id="threads-count" class="threads-count"></span>
         </h3>
+        <input type="text" id="threads-filter" placeholder="按线名/内容搜索…" style="display:none">
         <div id="threads-list"></div>
+        <div id="threads-empty" style="display:none">没有匹配的关注线</div>
       </div>
 
       <h3 class="timeline-title">完整历史</h3>
@@ -627,19 +641,40 @@ async function refreshTopicDetail(name, silent) {
 }
 
 const TYPE_LABEL = {want: '主线目标', obstacle: '当前卡点', node: '关键节点'};
+const THREADS_FILTER_THRESHOLD = 15; // 线数超过这个才显示搜索框，少的话滚动一下就看完了，不用额外UI
+let currentThreads = [];
+let currentThreadsTopic = null;
 
 function renderThreads(topicName, threads) {
+  currentThreads = threads;
+  currentThreadsTopic = topicName;
   const section = document.getElementById('threads-section');
-  const countEl = document.getElementById('threads-count');
-  const list = document.getElementById('threads-list');
-  list.innerHTML = '';
+  const filterInput = document.getElementById('threads-filter');
 
   if (!threads.length) {
     section.style.display = 'none';
     return;
   }
   section.style.display = 'block';
-  countEl.textContent = `(${threads.length}条)`;
+  filterInput.style.display = threads.length > THREADS_FILTER_THRESHOLD ? 'block' : 'none';
+  filterInput.value = '';
+  renderThreadRows(topicName, threads);
+}
+
+function renderThreadRows(topicName, threads) {
+  const countEl = document.getElementById('threads-count');
+  const list = document.getElementById('threads-list');
+  const emptyEl = document.getElementById('threads-empty');
+  list.innerHTML = '';
+  countEl.textContent = `(${threads.length}/${currentThreads.length}条)`;
+
+  if (!threads.length) {
+    list.style.display = 'none';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  list.style.display = 'block';
+  emptyEl.style.display = 'none';
 
   threads.forEach(t => {
     const row = document.createElement('div');
@@ -660,6 +695,14 @@ function renderThreads(topicName, threads) {
     list.appendChild(row);
   });
 }
+
+document.getElementById('threads-filter').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  const filtered = q
+    ? currentThreads.filter(t => t.thread_label.toLowerCase().includes(q) || t.content.toLowerCase().includes(q))
+    : currentThreads;
+  renderThreadRows(currentThreadsTopic, filtered);
+});
 
 async function toggleThread(topicName, thread, bodyEl) {
   const expanded = bodyEl.classList.contains('expanded');
@@ -713,19 +756,38 @@ async function toggleThread(topicName, thread, bodyEl) {
 
 async function loadPending(name) {
   const box = document.getElementById('pending-box');
+  const pendingRow = document.querySelector('#pending-box .pending-row');
   const text = document.getElementById('pending-text');
+  const healthLine = document.getElementById('health-line');
   const res = await fetch('/api/topic/' + encodeURIComponent(name) + '/pending');
   const data = await res.json();
-  if (!data.available) {
-    box.style.display = 'none';
-    return;
-  }
-  box.style.display = 'flex';
-  if (data.new_user_turns === 0 && data.new_edits === 0) {
-    text.textContent = '已经是最新的，没有待同步的内容';
+
+  if (data.available) {
+    pendingRow.style.display = 'flex';
+    if (data.new_user_turns === 0 && data.new_edits === 0) {
+      text.textContent = '已经是最新的，没有待同步的内容';
+    } else {
+      text.textContent = `自上次同步以来：${data.new_user_turns}条新消息，${data.new_edits}次代码改动`;
+    }
   } else {
-    text.textContent = `自上次同步以来：${data.new_user_turns}条新消息，${data.new_edits}次代码改动`;
+    pendingRow.style.display = 'none';
   }
+
+  const parts = [];
+  if (data.recent_failure_count > 0) {
+    parts.push(`<span class="warn">最近24小时提取失败${data.recent_failure_count}次${data.last_failure ? '（最近一次：' + escapeHtml(data.last_failure.error.slice(0, 40)) + '…）' : ''}</span>`);
+  }
+  if (data.hook_last_seen) {
+    parts.push(`Hook上次活跃：${formatTs(data.hook_last_seen)}`);
+  }
+  if (parts.length) {
+    healthLine.innerHTML = parts.join('');
+    healthLine.style.display = 'flex';
+  } else {
+    healthLine.style.display = 'none';
+  }
+
+  box.style.display = (data.available || parts.length) ? 'flex' : 'none';
 }
 
 document.getElementById('sync-btn').onclick = async () => {

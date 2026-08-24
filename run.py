@@ -13,7 +13,7 @@ from pathlib import Path
 
 import analysis
 import observer
-from storage import ledger
+from storage import capture_log, ledger
 
 DEFAULT_N = 5
 DEFAULT_INTERVAL = 30
@@ -49,6 +49,7 @@ def run_once(transcript_path: str, session_id: str, n: int) -> int:
             )
         except Exception as e:
             print(f"  提取失败: {e}，本检查点跳过，进度不推进，下次重试")
+            capture_log.record_failure(session_id, str(e))
             continue
 
         if not records:

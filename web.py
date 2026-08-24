@@ -9,7 +9,7 @@ import brain
 import observer
 import run as run_module
 from hooks import hook_setup
-from storage import ledger, reports, session_registry, topic_paths
+from storage import capture_log, ledger, reports, session_registry, topic_paths
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -146,6 +146,19 @@ def api_topic_implementation(topic_label):
     return jsonify({"result": result, "report": entry})
 
 
+def _health_fields(topic_label: str, session_id: str | None) -> dict:
+    """失败次数/Hook活跃时间——不依赖transcript还在不在，跟"待同步计数"是独立的两件事，
+    transcript没了也应该照样能看到"最近是不是出过问题"。"""
+    failures = capture_log.recent_failures(session_id, since_hours=24) if session_id else []
+    project_path = topic_paths.get_path(topic_label)
+    hook_entry = session_registry.get(project_path) if project_path else None
+    return {
+        "recent_failure_count": len(failures),
+        "last_failure": failures[-1] if failures else None,
+        "hook_last_seen": hook_entry["last_seen"] if hook_entry else None,
+    }
+
+
 @app.route("/api/topic/<path:topic_label>/pending")
 def api_topic_pending(topic_label):
     """不调模型，纯计数：自上次处理的检查点以来，新增了多少条消息、多少次代码改动。"""
@@ -156,15 +169,16 @@ def api_topic_pending(topic_label):
             session_id = current[key]["session_id"]
             break
     if not session_id:
-        return jsonify({"available": False, "reason": "找不到这个话题关联的session"})
+        return jsonify({"available": False, "reason": "找不到这个话题关联的session", **_health_fields(topic_label, None)})
 
     transcript_path = observer.find_transcript_by_session_id(session_id)
     if not transcript_path:
-        return jsonify({"available": False, "reason": "transcript文件已经不在了"})
+        return jsonify({"available": False, "reason": "transcript文件已经不在了", **_health_fields(topic_label, session_id)})
 
     progress = ledger.get_progress(session_id)
     result = observer.count_pending_activity(transcript_path, progress)
     result["available"] = True
+    result.update(_health_fields(topic_label, session_id))
     return jsonify(result)
 
 
