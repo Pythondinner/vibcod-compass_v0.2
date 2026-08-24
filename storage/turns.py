@@ -46,7 +46,12 @@ def record_assistant_message(session_id: str, prompt_id: str, text: str) -> None
 
 def get_paired_turns(session_id: str) -> list[dict]:
     """按prompt_id配对user/assistant两行，只返回两边都到齐的完整轮次，按user那行先出现的顺序排列。
-    还差assistant那半的（Stop还没触发，正在进行中的一轮）不返回，留给下一次读。"""
+    还差assistant那半的（Stop还没触发，正在进行中的一轮）不返回，留给下一次读。
+
+    每条轮次带上cwd（取自user那行）——早期版本这里丢过cwd字段，导致一个session如果真的
+    跨了多个项目目录（比如中途cd到别的地方），配对完之后完全没法按项目区分，只能强行假设
+    整个session属于调用方传进来的单一cwd。带上cwd之后，跨topic的分组交给上层
+    （get_paired_turns_for_topic）按这个字段做，不用再假设。"""
     path = _log_file_for(session_id)
     if not os.path.exists(path):
         return []
@@ -77,9 +82,31 @@ def get_paired_turns(session_id: str) -> list[dict]:
         if "user" in pair and "assistant" in pair:
             turns.append({
                 "prompt_id": pid,
+                "session_id": session_id,
+                "cwd": pair["user"].get("cwd"),
                 "user_text": pair["user"]["text"],
                 "assistant_text": pair["assistant"]["text"],
                 "user_ts": pair["user"]["ts"],
                 "assistant_ts": pair["assistant"]["ts"],
             })
     return turns
+
+
+def list_session_ids() -> list[str]:
+    if not os.path.isdir(TURNS_DIR):
+        return []
+    return [f[:-6] for f in os.listdir(TURNS_DIR) if f.endswith(".jsonl")]
+
+
+def get_paired_turns_for_topic(topic_label: str) -> list[dict]:
+    """跨所有session扫一遍，只留cwd标准化之后等于这个topic_label的完整轮次，按时间排序。
+    "检查一下这个项目"是围绕项目、不是围绕单次会话的——同一个项目可能被开过很多次
+    Claude Code会话，只看一个session_id会漏掉其他会话里的真实进展。"""
+    result = []
+    for sid in list_session_ids():
+        for t in get_paired_turns(sid):
+            cwd = t.get("cwd")
+            if cwd and os.path.normpath(cwd) == topic_label:
+                result.append(t)
+    result.sort(key=lambda t: t["user_ts"])
+    return result

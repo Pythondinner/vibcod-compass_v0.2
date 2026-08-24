@@ -31,12 +31,17 @@ CREATE TABLE IF NOT EXISTS feature_records (
     created_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS intake_progress (
-    session_id TEXT PRIMARY KEY,
-    processed_turn_count INTEGER NOT NULL,
+CREATE TABLE IF NOT EXISTS check_progress (
+    topic_label TEXT PRIMARY KEY,
+    last_checked_ts TEXT,
     updated_at TEXT NOT NULL
 );
 """
+# check_progress按topic_label（不是session_id）记游标——"检查一下这个项目"是用户对着一个
+# 项目触发的动作，不是对着某一次Claude Code会话，同一个项目可能被开过很多次会话。游标存的是
+# "处理到哪个时间点了"（user_ts），不是"处理了几条"——因为轮次现在是跨session合并读出来的
+# （turns.get_paired_turns_for_topic），合并之后的顺序不是任何单个session内部的顺序，
+# 用计数当游标会对不上，用时间戳可以直接做">"过滤，不用关心到底来自哪个session。
 
 
 def normalize_topic(cwd: str) -> str:
@@ -134,22 +139,42 @@ def get_history(topic_label: str, db_path: str = DB_PATH) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def get_progress(session_id: str, db_path: str = DB_PATH) -> int:
+def get_last_checked(topic_label: str, db_path: str = DB_PATH) -> str | None:
     conn = get_connection(db_path)
     row = conn.execute(
-        "SELECT processed_turn_count FROM intake_progress WHERE session_id=?",
-        (session_id,),
+        "SELECT last_checked_ts FROM check_progress WHERE topic_label=?",
+        (topic_label,),
     ).fetchone()
     conn.close()
-    return row["processed_turn_count"] if row else 0
+    return row["last_checked_ts"] if row else None
 
 
-def set_progress(session_id: str, count: int, db_path: str = DB_PATH) -> None:
+def set_last_checked(topic_label: str, ts: str, db_path: str = DB_PATH) -> None:
     conn = get_connection(db_path)
     conn.execute(
-        "INSERT INTO intake_progress (session_id, processed_turn_count, updated_at) VALUES (?, ?, ?) "
-        "ON CONFLICT(session_id) DO UPDATE SET processed_turn_count=excluded.processed_turn_count, updated_at=excluded.updated_at",
-        (session_id, count, _now()),
+        "INSERT INTO check_progress (topic_label, last_checked_ts, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(topic_label) DO UPDATE SET last_checked_ts=excluded.last_checked_ts, updated_at=excluded.updated_at",
+        (topic_label, ts, _now()),
     )
     conn.commit()
     conn.close()
+
+
+def set_feature_status(topic_label: str, feature_label: str, status: str, db_path: str = DB_PATH) -> bool:
+    """人工确认一个功能的完成状态——不是intake/verify自动写的，是"AI建议、人工确认"这条原则
+    落地的地方：verify.py只返回判断文字，从不自己改这个字段，只有用户看过判断之后主动确认，
+    这里才会真的更新。只更新这个功能最新那条feature记录的status，不新增记录、不动历史。
+    找不到这个功能返回False。"""
+    conn = get_connection(db_path)
+    latest = conn.execute(
+        "SELECT id FROM feature_records WHERE topic_label=? AND record_type='feature' AND label=? "
+        "ORDER BY created_at DESC, id DESC LIMIT 1",
+        (topic_label, feature_label),
+    ).fetchone()
+    if not latest:
+        conn.close()
+        return False
+    conn.execute("UPDATE feature_records SET status=? WHERE id=?", (status, latest["id"]))
+    conn.commit()
+    conn.close()
+    return True

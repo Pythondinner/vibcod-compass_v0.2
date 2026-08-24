@@ -6,14 +6,20 @@
 3. topic_label直接用cwd决定，不靠AI猜话题标签——cwd是Hook自带的确定信号，
    今天真实撞到过AI每个checkpoint独立猜话题标签、猜不稳导致21条记录被误判的bug，
    这次从源头上减少这个判断空间
-"""
+
+编排方式：不再是"攒够N轮自动在后台触发"——那是比老系统还激进的自动化，老系统的原则一直是
+"判断权留给用户，Brain从不自动触发"，只有纯计数（不调模型）是自动的。这次把这条原则原样
+搬回来：count_pending()纯计数、不调模型，实时告诉用户攒了多少新对话、多少代码改动；
+真正的判断（check_now()）只在用户主动确认时才触发，一次性把距离上次确认以来的全部内容
+喂进去，不再人为切成固定大小的小批——这样也不需要一个后台调度器去决定"什么时候该跑"，
+触发时机就是用户点确认的那一刻。"""
 import json
 
 from chat import call_deepseek
 from prompt_safety import INJECTION_DEFENSE_NOTE, wrap_untrusted
-from storage import feature_ledger, turns
+from storage import edit_log, feature_ledger, turns
 
-BATCH_SIZE = 3  # 攒够3轮完整对话才触发一次判断，单轮信息量通常不够，跟老版本的权衡一致
+import verify
 
 INTAKE_PROMPT = """你是一个观察者，负责从一段真实的开发对话里，判断有没有出现新的功能诉求、
 新的卡点（阻碍）、或者具体的技术决定。这个项目没有固定的"主线终点"——它是由一个个具体功能
@@ -93,43 +99,91 @@ def extract(turn_batch: list[dict], known_features: list[dict], known_obstacles:
     }
 
 
-def run_once(session_id: str, cwd: str) -> int:
-    """处理一个session从上次进度之后到目前为止攒够的新一批checkpoint。返回处理了几批。"""
+def _pending_turns(topic_label: str) -> list[dict]:
+    all_turns = turns.get_paired_turns_for_topic(topic_label)
+    last_checked = feature_ledger.get_last_checked(topic_label)
+    if not last_checked:
+        return all_turns
+    return [t for t in all_turns if t["user_ts"] > last_checked]
+
+
+def count_pending(cwd: str) -> dict:
+    """纯计数，不调模型：距离上次用户确认以来，这个项目新增了多少轮完整对话、多少次代码改动。
+    跟老observer.count_pending_activity是同一个定位——永远自动、永远不花钱，负责让用户
+    知道"现在攒了多少东西"，判断要不要点确认是用户自己的事。"""
     topic_label = feature_ledger.normalize_topic(cwd)
-    all_turns = turns.get_paired_turns(session_id)
-    start_after = feature_ledger.get_progress(session_id)
-    pending = all_turns[start_after:]
+    pending_turns = _pending_turns(topic_label)
 
-    processed = 0
-    for i in range(0, len(pending) - len(pending) % BATCH_SIZE, BATCH_SIZE):
-        batch = pending[i : i + BATCH_SIZE]
-        known_features = feature_ledger.get_known(topic_label, "feature")
-        known_obstacles = feature_ledger.get_known(topic_label, "obstacle")
+    last_checked = feature_ledger.get_last_checked(topic_label)
+    edits = edit_log.read_edits(cwd)
+    pending_edits = [e for e in edits if not last_checked or e["logged_at"] > last_checked]
 
-        result = extract(batch, known_features, known_obstacles)
-        prompt_ids = [t["prompt_id"] for t in batch]
-        feature_ledger.insert_batch(
-            topic_label,
-            result["features"],
-            result["obstacles"],
-            result["nodes"],
-            session_id,
-            prompt_ids,
-        )
-        start_after += len(batch)
-        feature_ledger.set_progress(session_id, start_after)
-        processed += 1
+    return {
+        "topic_label": topic_label,
+        "pending_turns": len(pending_turns),
+        "pending_edits": len(pending_edits),
+        "last_checked": last_checked,
+    }
 
-    return processed
+
+def check_now(cwd: str) -> dict:
+    """用户主动触发的"检查一下这个项目"：把距离上次确认以来全部积累的完整对话一次性喂给
+    intake判断有没有新功能/新卡点/新决定；这批里新出现或者有新决定的功能，紧接着自动跑一次
+    代码核对——一次操作直接拿到"新增了什么+这些新增的东西实现了多少"，不需要用户先跑提取、
+    再一个个手动点检查代码。没有积累任何新内容时直接返回，不空跑一次模型调用。"""
+    topic_label = feature_ledger.normalize_topic(cwd)
+    pending = _pending_turns(topic_label)
+
+    if not pending:
+        return {"topic_label": topic_label, "new_turns": 0, "extraction": None, "verify_results": {}}
+
+    known_features = feature_ledger.get_known(topic_label, "feature")
+    known_obstacles = feature_ledger.get_known(topic_label, "obstacle")
+
+    result = extract(pending, known_features, known_obstacles)
+    prompt_ids = [t["prompt_id"] for t in pending]
+    feature_ledger.insert_batch(
+        topic_label,
+        result["features"],
+        result["obstacles"],
+        result["nodes"],
+        session_id=None,
+        source_prompt_ids=prompt_ids,
+    )
+    feature_ledger.set_last_checked(topic_label, pending[-1]["user_ts"])
+
+    touched_labels = {f["label"] for f in result["features"]}
+    touched_labels |= {n["feature_label"] for n in result["nodes"] if n.get("feature_label")}
+    verify_results = {label: verify.check_feature(topic_label, label, cwd) for label in touched_labels}
+
+    return {
+        "topic_label": topic_label,
+        "new_turns": len(pending),
+        "extraction": result,
+        "verify_results": verify_results,
+    }
 
 
 if __name__ == "__main__":
     import sys
 
-    if len(sys.argv) < 3:
-        print("用法: python intake.py <session_id> <cwd>")
+    if len(sys.argv) < 2:
+        print("用法: python intake.py <cwd> [--check]")
+        print("  不带--check：只显示待处理数量，不调模型")
+        print("  带--check：真正触发一次检查")
         sys.exit(1)
 
     feature_ledger.init_db()
-    count = run_once(sys.argv[1], sys.argv[2])
-    print(f"处理了{count}批")
+    cwd_arg = sys.argv[1]
+    if "--check" in sys.argv:
+        r = check_now(cwd_arg)
+        print(f"处理了{r['new_turns']}轮新对话")
+        if r["extraction"]:
+            print(f"新功能{len(r['extraction']['features'])}个, 新卡点{len(r['extraction']['obstacles'])}个, 新决定{len(r['extraction']['nodes'])}条")
+        for label, verdict in r["verify_results"].items():
+            print(f"\n=== {label} ===\n{verdict}")
+    else:
+        p = count_pending(cwd_arg)
+        print(f"话题: {p['topic_label']}")
+        print(f"待处理: {p['pending_turns']}轮对话, {p['pending_edits']}次代码改动")
+        print(f"上次确认: {p['last_checked'] or '（从未确认过）'}")
