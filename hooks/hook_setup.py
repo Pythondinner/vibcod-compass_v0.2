@@ -9,7 +9,11 @@ HOOK_SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hoo
 
 
 def _hook_command() -> str:
-    return f'"{sys.executable}" "{HOOK_SCRIPT_PATH}"'
+    # -X utf8 是关键：hook_register.py靠stdin接JSON payload，Claude Code传过来的是正确的UTF-8，
+    # 但不加这个参数时Python的sys.stdin会退回系统默认编码——这台机器上是GBK，UTF-8字节被当GBK
+    # 解码，中文路径全部变乱码（"刑事阅卷Agent"变成"鍒戜簨闃呭嵎Agent"这种）。真实复现过、加上
+    # 这个参数后确认修好，不是随便猜的。
+    return f'"{sys.executable}" -X utf8 "{HOOK_SCRIPT_PATH}"'
 
 
 def settings_path_for(project_path: str) -> str:
