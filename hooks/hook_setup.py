@@ -9,7 +9,10 @@ HOOK_SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hoo
 
 
 def _hook_command() -> str:
-    return f'"{sys.executable}" "{HOOK_SCRIPT_PATH}"'
+    # -X utf8：Windows上不加这个,中文路径/内容经Hook子进程传递时会被按系统默认代码页
+    # (不是UTF-8)解码,真实撞过字节层面就丢失、没法恢复的乱码。这次设计阶段就定下来,
+    # 不是等真出现乱码数据才补丁。
+    return f'"{sys.executable}" -X utf8 "{HOOK_SCRIPT_PATH}"'
 
 
 def settings_path_for(project_path: str) -> str:
@@ -30,12 +33,14 @@ def is_attached(project_path: str) -> bool:
         return False
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-    return _entries_have_our_hook(data.get("hooks", {}).get("UserPromptSubmit", []))
+    hooks = data.get("hooks", {})
+    return _entries_have_our_hook(hooks.get("UserPromptSubmit", [])) and _entries_have_our_hook(hooks.get("Stop", []))
 
 
 def attach(project_path: str) -> None:
-    """幂等——已经接过就不会重复添加。同时接UserPromptSubmit（登记活跃session）
-    和PostToolUse（抓精确diff，matcher限定Edit|Write|NotebookEdit，照diff_PR的做法）。
+    """幂等——已经接过就不会重复添加。接三个事件：UserPromptSubmit（登记活跃session+抓用户原话），
+    PostToolUse（抓精确diff，matcher限定Edit|Write|NotebookEdit，照diff_PR的做法），
+    Stop（抓这一轮助手完整回复，last_assistant_message字段）。
     """
     settings_dir = os.path.join(project_path, ".claude")
     path = settings_path_for(project_path)
@@ -63,6 +68,12 @@ def attach(project_path: str) -> None:
         ptu_entries.append({
             "matcher": "Edit|Write|NotebookEdit",
             "hooks": [{"type": "command", "command": _hook_command(), "timeout": 5}],
+        })
+
+    stop_entries = data["hooks"].setdefault("Stop", [])
+    if not _entries_have_our_hook(stop_entries):
+        stop_entries.append({
+            "hooks": [{"type": "command", "command": _hook_command(), "timeout": 5}]
         })
 
     with open(path, "w", encoding="utf-8") as f:

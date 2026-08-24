@@ -3,10 +3,13 @@ __pycache__/
 *.pyc
 notebook.db
 test_notebook.db
+features.db
 topic_paths.json
 session_registry.json
 edit_logs/
 reports/
+turns/
+hook_debug.jsonl
 .claude/settings.json
 .venv/
 test_analysis.py
