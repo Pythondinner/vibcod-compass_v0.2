@@ -74,9 +74,25 @@ def api_project_detail(topic_label):
     })
 
 
-@app.route("/api/project/<path:topic_label>/check", methods=["POST"])
-def api_project_check(topic_label):
-    result = intake.check_now(topic_label)
+@app.route("/api/project/<path:topic_label>/preview", methods=["POST"])
+def api_project_preview(topic_label):
+    """只判断、不写库——带上真实对话原文和真实代码diff，让用户自己核对AI判断得对不对，
+    确认了才调/commit真正落地。"""
+    result = intake.preview_check(topic_label)
+    return jsonify(result)
+
+
+@app.route("/api/project/<path:topic_label>/commit", methods=["POST"])
+def api_project_commit(topic_label):
+    """用户看完预览、确认没问题之后才调用——真正写库+推进游标+跑代码核对。
+    pending_turns和extraction必须是/preview返回的原样内容，不是重新生成的，
+    保证"用户看到并确认的"和"真正写进去的"是同一批。"""
+    body = request.get_json(silent=True) or {}
+    pending_turns = body.get("pending_turns")
+    extraction = body.get("extraction")
+    if pending_turns is None or extraction is None:
+        return jsonify({"error": "缺少pending_turns或extraction，必须先调/preview拿到这两样"}), 400
+    result = intake.commit_check(topic_label, pending_turns, extraction)
     return jsonify(result)
 
 

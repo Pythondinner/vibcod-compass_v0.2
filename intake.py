@@ -126,42 +126,65 @@ def count_pending(cwd: str) -> dict:
     }
 
 
-def check_now(cwd: str) -> dict:
-    """用户主动触发的"检查一下这个项目"：把距离上次确认以来全部积累的完整对话一次性喂给
-    intake判断有没有新功能/新卡点/新决定；这批里新出现或者有新决定的功能，紧接着自动跑一次
-    代码核对——一次操作直接拿到"新增了什么+这些新增的东西实现了多少"，不需要用户先跑提取、
-    再一个个手动点检查代码。没有积累任何新内容时直接返回，不空跑一次模型调用。"""
+def preview_check(cwd: str) -> dict:
+    """预览：距离上次确认以来积累了什么，AI判断出了什么变化——但不写库、不推进游标。
+    带上真实原文（对话全文、代码改动的真实diff），不是只给AI提炼过的摘要，让用户能自己核对
+    "AI说的这些新功能/新卡点，是不是真的从这些对话里来的"。这一步之前直接跳过、提取完就写库，
+    是真实的设计缺陷——"AI建议、人工确认"这条原则之前只用在"标记功能已完成"这一步，但提取
+    本身(判断出现了什么新功能)才是最容易出错的一步，今天最初21条记录被误判就是提取判断错了，
+    这一步更应该有人工确认的机会，不能提取完直接落地。"""
     topic_label = feature_ledger.normalize_topic(cwd)
     pending = _pending_turns(topic_label)
 
+    last_checked = feature_ledger.get_last_checked(topic_label)
+    edits = edit_log.read_edits(cwd)
+    pending_edits = [e for e in edits if not last_checked or e["logged_at"] > last_checked]
+
     if not pending:
-        return {"topic_label": topic_label, "new_turns": 0, "extraction": None, "verify_results": {}}
+        return {
+            "topic_label": topic_label,
+            "pending_turns": [],
+            "pending_edits": pending_edits,
+            "extraction": None,
+        }
 
     known_features = feature_ledger.get_known(topic_label, "feature")
     known_obstacles = feature_ledger.get_known(topic_label, "obstacle")
-
     result = extract(pending, known_features, known_obstacles)
-    prompt_ids = [t["prompt_id"] for t in pending]
-    feature_ledger.insert_batch(
-        topic_label,
-        result["features"],
-        result["obstacles"],
-        result["nodes"],
-        session_id=None,
-        source_prompt_ids=prompt_ids,
-    )
-    feature_ledger.set_last_checked(topic_label, pending[-1]["user_ts"])
-
-    touched_labels = {f["label"] for f in result["features"]}
-    touched_labels |= {n["feature_label"] for n in result["nodes"] if n.get("feature_label")}
-    verify_results = {label: verify.check_feature(topic_label, label, cwd) for label in touched_labels}
 
     return {
         "topic_label": topic_label,
-        "new_turns": len(pending),
+        "pending_turns": pending,
+        "pending_edits": pending_edits,
         "extraction": result,
-        "verify_results": verify_results,
     }
+
+
+def commit_check(cwd: str, pending_turns: list[dict], extraction: dict) -> dict:
+    """用户看完preview_check的原文+AI判断，确认没问题之后才调用——这一步才真正写库、
+    推进游标，紧接着对新涉及的功能自动跑一次代码核对。pending_turns要传回preview时
+    看到的那一批（不是重新查一遍），保证"用户看到的"和"真正写进去的"是同一批内容，
+    不会因为两次调用之间又有新对话进来而对不上。"""
+    topic_label = feature_ledger.normalize_topic(cwd)
+    if not pending_turns:
+        return {"topic_label": topic_label, "verify_results": {}}
+
+    prompt_ids = [t["prompt_id"] for t in pending_turns]
+    feature_ledger.insert_batch(
+        topic_label,
+        extraction["features"],
+        extraction["obstacles"],
+        extraction["nodes"],
+        session_id=None,
+        source_prompt_ids=prompt_ids,
+    )
+    feature_ledger.set_last_checked(topic_label, pending_turns[-1]["user_ts"])
+
+    touched_labels = {f["label"] for f in extraction["features"]}
+    touched_labels |= {n["feature_label"] for n in extraction["nodes"] if n.get("feature_label")}
+    verify_results = {label: verify.check_feature(topic_label, label, cwd) for label in touched_labels}
+
+    return {"topic_label": topic_label, "verify_results": verify_results}
 
 
 def _confirm_loop(topic_label: str, verify_results: dict) -> None:
@@ -180,13 +203,23 @@ def _confirm_loop(topic_label: str, verify_results: dict) -> None:
             print("跳过，状态不变")
 
 
+def _print_extraction_preview(extraction: dict) -> None:
+    print(f"新功能{len(extraction['features'])}个, 新卡点{len(extraction['obstacles'])}个, 新决定{len(extraction['nodes'])}条")
+    for f in extraction["features"]:
+        print(f"  [功能] {f['label']}: {f['content']}")
+    for o in extraction["obstacles"]:
+        print(f"  [卡点] {o['label']}: {o['content']}" + (f"（关联：{o['related_feature']}）" if o.get("related_feature") else ""))
+    for n in extraction["nodes"]:
+        print(f"  [决定] ({n['feature_label'] or '未挂靠功能'}) {n['content']}")
+
+
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
         print("用法: python intake.py <cwd> [--check] [--migrate <新cwd>]")
         print("  不带参数：只显示待处理数量，不调模型")
-        print("  --check：真正触发一次检查，已实现的功能会问要不要标记完成")
+        print("  --check：预览+确认+核对的完整流程（先给你看原文和AI判断，你确认了才写库）")
         print("  --migrate <新cwd>：项目文件夹改名后，把旧路径下的记录搬到新路径")
         sys.exit(1)
 
@@ -202,10 +235,27 @@ if __name__ == "__main__":
         r = feature_ledger.migrate_topic(cwd_arg, new_cwd)
         print(f"已把{r['records_moved']}条记录从'{r['old_topic']}'搬到'{r['new_topic']}'")
     elif "--check" in sys.argv:
-        r = check_now(cwd_arg)
-        print(f"处理了{r['new_turns']}轮新对话")
-        if r["extraction"]:
-            print(f"新功能{len(r['extraction']['features'])}个, 新卡点{len(r['extraction']['obstacles'])}个, 新决定{len(r['extraction']['nodes'])}条")
+        p = preview_check(cwd_arg)
+        if not p["extraction"]:
+            print("没有新对话，无事可做")
+            sys.exit(0)
+
+        print(f"=== 距离上次确认，新增了{len(p['pending_turns'])}轮对话、{len(p['pending_edits'])}次代码改动 ===")
+        for t in p["pending_turns"]:
+            print(f"\n[用户] {t['user_text']}\n[助手] {t['assistant_text']}")
+        if p["pending_edits"]:
+            print(f"\n代码改动：" + "、".join(e["file_path"] for e in p["pending_edits"]))
+
+        print("\n=== AI从这批内容里判断出的变化 ===")
+        _print_extraction_preview(p["extraction"])
+
+        answer = input("\n这份判断要写入吗？[y/N] ").strip().lower()
+        if answer != "y":
+            print("已取消，没有写入任何内容，下次检查还会看到这批对话")
+            sys.exit(0)
+
+        r = commit_check(cwd_arg, p["pending_turns"], p["extraction"])
+        print("\n已写入。")
         _confirm_loop(r["topic_label"], r["verify_results"])
     else:
         p = count_pending(cwd_arg)
