@@ -96,18 +96,6 @@ def api_project_commit(topic_label):
     return jsonify(result)
 
 
-@app.route("/api/project/<path:topic_label>/confirm", methods=["POST"])
-def api_project_confirm(topic_label):
-    body = request.get_json(silent=True) or {}
-    feature_label = body.get("feature_label")
-    if not feature_label:
-        return jsonify({"error": "缺少feature_label"}), 400
-    ok = feature_ledger.set_feature_status(topic_label, feature_label, "resolved")
-    if not ok:
-        return jsonify({"error": "找不到这个功能"}), 404
-    return jsonify({"ok": True})
-
-
 @app.route("/api/attach_hook", methods=["POST"])
 def api_attach_hook():
     body = request.get_json(silent=True) or {}

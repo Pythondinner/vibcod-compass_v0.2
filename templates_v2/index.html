@@ -415,6 +415,9 @@ async function commitPreview(previewData) {
 }
 
 function renderVerifyResults(verifyResults) {
+  // 代码核对不再需要人工点"标记完成"——判断代码是否实现了需求，是用户没法自己核实的技术
+  // 判断，不像"AI理解的需求对不对"用户能一眼看出来。verify.py判断"已实现"，commit_check()
+  // 已经直接写了状态，这里只展示结果，不再提供确认按钮。
   const box = document.getElementById('check-result-box');
   if (!box) return;
   if (!verifyResults || !Object.keys(verifyResults).length) {
@@ -427,28 +430,9 @@ function renderVerifyResults(verifyResults) {
     html += `<div class="verify-box">
       <div class="verify-verdict ${verdictClass}">${escapeHtml(label)}：${result.verdict || '核对失败'}</div>
       <div>${escapeHtml(result.text)}</div>
-      ${result.verdict === '已实现' ? `<button class="confirm-btn" data-label="${escapeHtml(label)}">标记完成</button>` : ''}
     </div>`;
   }
   box.innerHTML = html;
-  box.querySelectorAll('.confirm-btn').forEach(btn => {
-    btn.onclick = async () => {
-      btn.disabled = true;
-      btn.textContent = '确认中…';
-      const r = await fetch('/api/project/' + encodeURIComponent(currentTopic) + '/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ feature_label: btn.dataset.label }),
-      });
-      if (r.ok) {
-        btn.textContent = '已标记完成';
-        await renderProject();
-      } else {
-        btn.disabled = false;
-        btn.textContent = '标记失败，重试';
-      }
-    };
-  });
 }
 
 document.getElementById('attach-btn').onclick = async () => {

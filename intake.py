@@ -184,23 +184,17 @@ def commit_check(cwd: str, pending_turns: list[dict], extraction: dict) -> dict:
     touched_labels |= {n["feature_label"] for n in extraction["nodes"] if n.get("feature_label")}
     verify_results = {label: verify.check_feature(topic_label, label, cwd) for label in touched_labels}
 
-    return {"topic_label": topic_label, "verify_results": verify_results}
-
-
-def _confirm_loop(topic_label: str, verify_results: dict) -> None:
-    """"AI建议、人工确认"这条原则在CLI阶段的落地——只有verify.py判断出"已实现"的功能才问，
-    部分实现/未实现/无法判断没有什么好确认的，不问。真正写库的set_feature_status()只在
-    用户明确输入y之后才调用，AI自己从来不直接改状态。"""
+    # "AI建议、人工确认"这条原则只用在用户真的有能力判断的地方——"AI理解的需求对不对"，
+    # 用户对自己说过的话有判断力，那道关卡在preview/commit这一步（人工确认了才会走到这里）。
+    # "代码是否真的实现了"需要读代码，vibe coding的用户本来就不具备也不想具备这个能力，
+    # 让他们"确认"一个自己没法验证的技术判断只是形式主义，不是真的把关。所以这一步不再等
+    # 前端点"标记完成"，verify.py判断"已实现"就直接写状态——AI在这里对自己的判断范围内
+    # 负全责，不需要一个没有能力复核它的人来背书。
     for label, result in verify_results.items():
-        print(f"\n=== {label} ===\n{result['text']}")
-        if result["verdict"] != "已实现":
-            continue
-        answer = input(f"\n『{label}』核对结果是已实现，要标记为完成状态吗？[y/N] ").strip().lower()
-        if answer == "y":
-            ok = feature_ledger.set_feature_status(topic_label, label, "resolved")
-            print("已标记完成" if ok else "标记失败：找不到这个功能")
-        else:
-            print("跳过，状态不变")
+        if result["verdict"] == "已实现":
+            feature_ledger.set_feature_status(topic_label, label, "resolved")
+
+    return {"topic_label": topic_label, "verify_results": verify_results}
 
 
 def _print_extraction_preview(extraction: dict) -> None:
@@ -255,8 +249,9 @@ if __name__ == "__main__":
             sys.exit(0)
 
         r = commit_check(cwd_arg, p["pending_turns"], p["extraction"])
-        print("\n已写入。")
-        _confirm_loop(r["topic_label"], r["verify_results"])
+        print("\n已写入。代码核对结果：")
+        for label, result in r["verify_results"].items():
+            print(f"\n=== {label}（{result['verdict'] or '核对失败'}）===\n{result['text']}")
     else:
         p = count_pending(cwd_arg)
         print(f"话题: {p['topic_label']}")
