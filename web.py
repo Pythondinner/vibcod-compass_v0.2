@@ -167,6 +167,23 @@ def api_thread_priority(topic_label, thread_label):
     return jsonify({"ok": True})
 
 
+@app.route("/api/topic/<path:topic_label>/thread/<path:thread_label>/status", methods=["POST"])
+def api_thread_status(topic_label, thread_label):
+    """手动把一条线标成resolved/open——resolved的唯一来源本来是AI在提取时看到对话里明说
+    "解决了"，大量真实完成是安静的、没人在对话里宣布，这个入口让用户自己纠正。"""
+    record_type = request.args.get("record_type")
+    if not record_type:
+        return jsonify({"error": "缺少record_type"}), 400
+    body = request.get_json(silent=True) or {}
+    status = body.get("status")
+    if status not in ("resolved", "open"):
+        return jsonify({"error": "status只能是'resolved'或'open'"}), 400
+    ok = ledger.mark_thread_status(topic_label, record_type, thread_label, status)
+    if not ok:
+        return jsonify({"error": "没找到这条线"}), 404
+    return jsonify({"ok": True})
+
+
 @app.route("/api/topic/<path:topic_label>/drift", methods=["POST"])
 def api_topic_drift(topic_label):
     result = brain.check_drift(topic_label)

@@ -200,6 +200,23 @@ def _is_stalled(source_end_ts: str | None, thread_status: str | None) -> bool:
     return (datetime.now(timezone.utc) - last).days >= STALLED_DAYS
 
 
+def mark_thread_status(topic_label: str, record_type: str, thread_label: str, status: str, db_path: str = DB_PATH) -> bool:
+    """用户手动把一条线标成resolved（或者反悔改回open）——resolved现在唯一的来源是提取
+    时AI看到对话里明说"解决了"才会标，大量真实完成是安静的、没人在对话里宣布，会一直卡在
+    "进行中"。这里不新增记录，直接更新这条线最新那条记录的thread_status，配合get_threads
+    取"最新记录状态"当线状态的逻辑，效果就是这条线立刻切换过去。找不到线返回False。"""
+    conn = get_connection(db_path)
+    latest = conn.execute(
+        "SELECT id FROM records WHERE topic_label=? AND record_type=? AND thread_label=? "
+        "ORDER BY source_end_ts DESC, id DESC LIMIT 1",
+        (topic_label, record_type, thread_label),
+    ).fetchone()
+    conn.close()
+    if not latest:
+        return False
+    return set_thread([latest["id"]], thread_label, status, db_path=db_path) > 0
+
+
 def set_thread_priority(
     topic_label: str, record_type: str, thread_label: str, priority: str, reason: str | None = None, db_path: str = DB_PATH
 ) -> None:

@@ -750,6 +750,42 @@ function renderPriorityControls(container, topicName, thread) {
   render();
 }
 
+// ---------- 手动标记已解决:resolved原来只有AI在提取时看到对话明说"解决了"才会标，
+// 大量真实完成是安静的、没人在对话里宣布，会一直卡在"进行中"，这里让用户自己纠正。
+// 跟优先级控件一样复用在摘要卡片和关注线列表两处，改完也是触发完整刷新保证两处同步。
+function renderStatusToggle(container, topicName, thread) {
+  const rt = thread.record_type;
+  const label = thread.thread_label;
+  const statusUrl = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(label)
+    + '/status?record_type=' + encodeURIComponent(rt);
+
+  async function setStatus(status) {
+    await fetch(statusUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    if (currentTopic) refreshTopicDetail(currentTopic, true);
+  }
+
+  function render() {
+    container.innerHTML = '';
+    const isResolved = thread.thread_status === 'resolved';
+    const badge = document.createElement('span');
+    badge.className = 'thread-status-badge ' + (isResolved ? 'resolved' : (thread.stalled ? 'stalled' : 'open'));
+    badge.textContent = isResolved ? '已解决' : (thread.stalled ? '已搁置' : '进行中');
+    container.appendChild(badge);
+
+    const actionBtn = document.createElement('span');
+    actionBtn.className = 'priority-btn';
+    actionBtn.style.marginLeft = '4px';
+    actionBtn.textContent = isResolved ? '撤销' : '标记已解决';
+    actionBtn.onclick = (e) => { e.stopPropagation(); setStatus(isResolved ? 'open' : 'resolved'); };
+    container.appendChild(actionBtn);
+  }
+  render();
+}
+
 // ---------- 摘要卡片:want是"一段一段的特点总结",obstacle是"堆积式列表" ----------
 // 只展示"进行中"(非resolved、非搁置)的线,避免摘要区变成又一个完整历史列表；
 // resolved/stalled的折叠在"查看已解决/已搁置"里,默认收起。
@@ -791,16 +827,19 @@ function buildFeatureItem(topicName, t) {
   head.className = 'feature-head';
   const labelEl = document.createElement('span');
   labelEl.className = 'feature-label';
-  labelEl.textContent = t.thread_label + (t.thread_status === 'resolved' ? '（已解决）' : t.stalled ? '（已搁置）' : '');
+  labelEl.textContent = t.thread_label;
+  const statusCtrl = document.createElement('span');
   const ctrl = document.createElement('span');
   ctrl.className = 'priority-controls';
   head.appendChild(labelEl);
+  head.appendChild(statusCtrl);
   head.appendChild(ctrl);
   const content = document.createElement('div');
   content.className = 'feature-content';
   content.textContent = t.content;
   item.appendChild(head);
   item.appendChild(content);
+  renderStatusToggle(statusCtrl, topicName, t);
   renderPriorityControls(ctrl, topicName, t);
   return item;
 }
@@ -825,15 +864,18 @@ function buildPileItem(topicName, t) {
   item.className = 'pile-item';
   const labelEl = document.createElement('span');
   labelEl.className = 'pile-label';
-  labelEl.textContent = t.thread_label + (t.thread_status === 'resolved' ? '（已解决）' : t.stalled ? '（已搁置）' : '') + '：';
+  labelEl.textContent = t.thread_label + '：';
   const contentEl = document.createElement('span');
   contentEl.className = 'pile-content';
   contentEl.textContent = t.content;
+  const statusCtrl = document.createElement('span');
   const ctrl = document.createElement('span');
   ctrl.className = 'priority-controls';
   item.appendChild(labelEl);
   item.appendChild(contentEl);
+  item.appendChild(statusCtrl);
   item.appendChild(ctrl);
+  renderStatusToggle(statusCtrl, topicName, t);
   renderPriorityControls(ctrl, topicName, t);
   return item;
 }
@@ -894,7 +936,7 @@ function renderThreadRows(topicName, threads) {
       <div class="thread-head">
         <span class="thread-type-badge ${t.record_type}">${TYPE_LABEL[t.record_type] || t.record_type}</span>
         <span class="thread-label">${escapeHtml(t.thread_label)}</span>
-        <span class="thread-status-badge ${t.stalled ? 'stalled' : t.thread_status}">${t.thread_status === 'resolved' ? '已解决' : (t.stalled ? '已搁置' : '进行中')}</span>
+        <span class="thread-status-toggle"></span>
         <span class="priority-controls thread-priority-controls"></span>
         <span class="thread-preview">${escapeHtml(t.content)}</span>
         <span class="thread-count">${t.record_count}条 · ${formatTs(t.source_end_ts)}</span>
@@ -903,7 +945,9 @@ function renderThreadRows(topicName, threads) {
     `;
     const head = row.querySelector('.thread-head');
     const body = row.querySelector('.thread-body');
+    const statusCtrl = row.querySelector('.thread-status-toggle');
     const priorityCtrl = row.querySelector('.thread-priority-controls');
+    renderStatusToggle(statusCtrl, topicName, t);
     renderPriorityControls(priorityCtrl, topicName, t);
     head.onclick = () => toggleThread(topicName, t, body);
     list.appendChild(row);
