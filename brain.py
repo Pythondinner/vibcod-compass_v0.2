@@ -378,23 +378,46 @@ RESOLVED_SUGGESTION_PROMPT = """以下是一份代码落地检测报告，检查
 
 __REPORT__
 
-请你只根据这份报告本身的内容判断：报告里有没有哪条关注线，被明确说成"决定和代码完全对得上、没有任何遗留问题"？
-只有报告原文明确表达了这个意思才算，不要自己脑补或者放宽标准——报告里说"部分兑现""无法判断""还有缺口"的
-关注线都不算，报告根本没提到的关注线也不算。
+这个项目目前还在进行中的特点(want)关注线如下，每条附带简短描述：
+__WANT_THREADS__
 
-只输出JSON：{"resolved_threads": ["线名1", "线名2", ...]}，一条都没有就输出{"resolved_threads": []}。
+请你分两部分判断，只依据这份报告本身的内容和上面列出的特点描述，不要自己脑补或者放宽标准：
+
+1. 报告里有没有哪条**决定(node)**关注线，被明确说成"决定和代码完全对得上、没有任何遗留问题"？
+只有报告原文明确表达了这个意思才算——报告里说"部分兑现""无法判断""还有缺口"的不算，报告根本没提到的也不算。
+
+2. 结合报告里已经确认完全兑现的那些决定，上面列出的**特点(want)**关注线里，有没有哪条看起来已经被
+完全覆盖了——报告确认兑现的决定，已经完整覆盖了这条特点描述的全部内容，不再有明显遗留？只有报告内容
+真的支撑这个结论才算，不要因为某一两个决定兑现了就推断整条特点都做完了，特点通常比单个决定范围更大，
+这是两个不同粒度的判断，宁可漏标也不要标错。
+
+只输出JSON：{"resolved_nodes": ["线名1", ...], "resolved_wants": ["线名1", ...]}，没有就输出空数组。
 """
 
 
-def suggest_resolved_threads(topic_label: str, implementation_report: str) -> list[str]:
-    """代码落地检测报告生成之后,额外做一次轻量提取——报告里有没有明确说"完全兑现"的关注线，
-    有的话作为建议返回给UI，用户确认了才会真的改thread_status，这里不直接写库。
-    不自动写库的原因：check_implementation查的是node(决定)级别的兑现情况，不代表整条线
-    (可能还有obstacle没解决)就该收尾——自动标错比"忘了标"更麻烦，之前当面跟用户对齐过这条。
-    这一步只读已经生成的报告文本，不重新读代码/diff，成本很低。提取失败就返回空列表，
-    不影响主报告本身，建议只是锦上添花。"""
-    prompt = RESOLVED_SUGGESTION_PROMPT.replace("__TOPIC__", topic_label).replace(
-        "__REPORT__", wrap_untrusted("REPORT", implementation_report)
+def suggest_resolved_threads(topic_label: str, implementation_report: str) -> list[dict]:
+    """代码落地检测报告生成之后,额外做一次轻量提取——报告里有没有明确说"完全兑现"的node线，
+    以及结合当前还在进行中的want线描述，有没有哪条特点看起来已经被完全覆盖了；有的话作为建议
+    返回给UI(每条带thread_label+record_type)，用户确认了才会真的改thread_status，这里不直接写库。
+    不自动写库的原因：check_implementation本质查的是node(决定)级别的兑现情况，就算是新增的
+    want判断，也只是"结合报告推断"，不是"报告本身就在讨论这条特点"——自动标错比"忘了标"更麻烦，
+    之前当面跟用户对齐过这条，这次want判断的确定性比node更弱，更没有理由破例自动写。
+    这一步只读已经生成的报告文本+当前want线列表，不重新读代码/diff，成本很低。提取失败就返回
+    空列表，不影响主报告本身，建议只是锦上添花。"""
+    want_threads = [
+        {"thread_label": t["thread_label"], "content": t["content"]}
+        for t in ledger.get_threads(topic_label)
+        if t["record_type"] == "want" and t.get("thread_status") != "resolved"
+    ]
+    want_threads_text = (
+        "\n".join(f"- 「{w['thread_label']}」：{w['content']}" for w in want_threads)
+        if want_threads
+        else "（这个项目目前没有还在进行中的特点关注线）"
+    )
+    prompt = (
+        RESOLVED_SUGGESTION_PROMPT.replace("__TOPIC__", topic_label)
+        .replace("__REPORT__", wrap_untrusted("REPORT", implementation_report))
+        .replace("__WANT_THREADS__", wrap_untrusted("WANT_THREADS", want_threads_text))
     )
     try:
         reply = call_deepseek(
@@ -404,8 +427,12 @@ def suggest_resolved_threads(topic_label: str, implementation_report: str) -> li
             ],
             json_mode=True,
         )
-        threads = json.loads(reply).get("resolved_threads", [])
-        return [t for t in threads if isinstance(t, str)]
+        data = json.loads(reply)
+        nodes = [t for t in data.get("resolved_nodes", []) if isinstance(t, str)]
+        wants = [t for t in data.get("resolved_wants", []) if isinstance(t, str)]
+        return [{"thread_label": t, "record_type": "node"} for t in nodes] + [
+            {"thread_label": t, "record_type": "want"} for t in wants
+        ]
     except (json.JSONDecodeError, KeyError, TypeError, AttributeError):
         return []
 

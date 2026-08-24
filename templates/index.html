@@ -316,16 +316,20 @@
   .suggestion-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
   .suggestion-label { color: var(--text); }
   .suggestion-confirmed { color: var(--muted); font-style: italic; }
+  .suggestions-confirm-all { display: inline-block; margin-bottom: 8px; }
 
-  /* "消消乐"悬浮提示:标完一条特点已解决之后,问要不要顺便标掉关联的卡点 */
+  /* "消消乐"悬浮提示:标完一条特点已解决之后,问要不要顺便标掉关联的卡点。
+     可能连续累积好几条特点各自的提示(一键确认全部时),所以是position:relative的容器,
+     内部按.cascade-group分段,X按钮固定在容器右上角,不是每段各自一个。 */
   #cascade-toast {
     position: fixed; bottom: 24px; right: 24px; width: 320px; max-height: 60vh; overflow-y: auto;
     background: var(--panel); border: 1px solid rgba(166,218,149,0.35); border-radius: 10px;
-    padding: 14px 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); z-index: 50;
+    padding: 32px 16px 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); z-index: 50;
   }
-  .cascade-title { font-size: 12.5px; font-weight: 700; color: var(--node); line-height: 1.5; margin-bottom: 10px; padding-right: 18px; position: relative; }
-  .cascade-close { position: absolute; top: -2px; right: -4px; cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 400; }
+  .cascade-close { position: absolute; top: 10px; right: 14px; cursor: pointer; color: var(--muted); font-size: 12px; }
   .cascade-close:hover { color: var(--text); }
+  .cascade-group + .cascade-group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .cascade-title { font-size: 12.5px; font-weight: 700; color: var(--node); line-height: 1.5; margin-bottom: 10px; }
   .cascade-row {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     padding: 7px 0; border-top: 1px dashed var(--border); font-size: 12px;
@@ -815,7 +819,7 @@ function renderStatusToggle(container, topicName, thread) {
     // "消消乐":标resolved的是一条特点(want)、又有关联着它且还没解决的卡点时，
     // 弹出来问要不要顺便也标掉——只是建议，判断权还是用户的，不自动清。
     if (status === 'resolved' && rt === 'want' && data.linked_obstacles && data.linked_obstacles.length) {
-      showCascadeToast(topicName, label, data.linked_obstacles);
+      showCascadeToast(topicName, [{ wantLabel: label, obstacles: data.linked_obstacles }]);
     }
   }
 
@@ -839,50 +843,60 @@ function renderStatusToggle(container, topicName, thread) {
 
 // ---------- "消消乐":标掉一条特点后,顺带问要不要标掉关联的卡点 ----------
 // 用悬浮toast而不是就地渲染——就地渲染的容器会被refreshTopicDetail整体重建,
-// 提示会跟着一起消失,悬浮在body上不受那次重渲染影响。同一时间只保留一个toast。
-function showCascadeToast(topicName, wantLabel, obstacles) {
-  const old = document.getElementById('cascade-toast');
-  if (old) old.remove();
+// 提示会跟着一起消失,悬浮在body上不受那次重渲染影响。
+// groups形如[{wantLabel, obstacles}, ...]——一键确认全部时可能连续标掉好几条特点,
+// 每条都可能各自带关联卡点,所以设计成"追加到同一个toast"而不是每次都整个替换重建,
+// 不然后一条特点的提示会把前一条的顶掉,用户看不到全部。
+function showCascadeToast(topicName, groups) {
+  let box = document.getElementById('cascade-toast');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'cascade-toast';
+    const closeBtn = document.createElement('span');
+    closeBtn.className = 'cascade-close';
+    closeBtn.textContent = '✕';
+    closeBtn.onclick = () => box.remove();
+    box.appendChild(closeBtn);
+    document.body.appendChild(box);
+  }
 
-  const box = document.createElement('div');
-  box.id = 'cascade-toast';
-  const title = document.createElement('div');
-  title.className = 'cascade-title';
-  title.textContent = `特点「${wantLabel}」已标记解决，关联的卡点要不要也一起清掉？`;
-  const closeBtn = document.createElement('span');
-  closeBtn.className = 'cascade-close';
-  closeBtn.textContent = '✕';
-  closeBtn.onclick = () => box.remove();
-  title.appendChild(closeBtn);
-  box.appendChild(title);
+  groups.forEach(({ wantLabel, obstacles }) => {
+    const section = document.createElement('div');
+    section.className = 'cascade-group';
+    const title = document.createElement('div');
+    title.className = 'cascade-title';
+    title.textContent = `特点「${wantLabel}」已标记解决，关联的卡点要不要也一起清掉？`;
+    section.appendChild(title);
 
-  obstacles.forEach(ob => {
-    const row = document.createElement('div');
-    row.className = 'cascade-row';
-    const text = document.createElement('span');
-    text.className = 'cascade-row-text';
-    text.textContent = `${ob.thread_label}：${ob.content}`;
-    const btn = document.createElement('button');
-    btn.className = 'cascade-btn';
-    btn.textContent = '顺便标掉';
-    btn.onclick = async () => {
-      const url = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(ob.thread_label)
-        + '/status?record_type=obstacle';
-      await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'resolved' }),
-      });
-      row.remove();
-      if (currentTopic) refreshTopicDetail(currentTopic, true);
-      if (!box.querySelector('.cascade-row')) box.remove();
-    };
-    row.appendChild(text);
-    row.appendChild(btn);
-    box.appendChild(row);
+    obstacles.forEach(ob => {
+      const row = document.createElement('div');
+      row.className = 'cascade-row';
+      const text = document.createElement('span');
+      text.className = 'cascade-row-text';
+      text.textContent = `${ob.thread_label}：${ob.content}`;
+      const btn = document.createElement('button');
+      btn.className = 'cascade-btn';
+      btn.textContent = '顺便标掉';
+      btn.onclick = async () => {
+        const url = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(ob.thread_label)
+          + '/status?record_type=obstacle';
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'resolved' }),
+        });
+        row.remove();
+        if (currentTopic) refreshTopicDetail(currentTopic, true);
+        if (!section.querySelector('.cascade-row')) section.remove();
+        if (!box.querySelector('.cascade-group')) box.remove();
+      };
+      row.appendChild(text);
+      row.appendChild(btn);
+      section.appendChild(row);
+    });
+
+    box.appendChild(section);
   });
-
-  document.body.appendChild(box);
 }
 
 // ---------- 摘要卡片:want是"一段一段的特点总结",obstacle是"堆积式列表" ----------
@@ -1275,6 +1289,29 @@ async function runReport(kind) {
   }
 }
 
+// 单条建议的确认逻辑抽成独立函数——单条按钮和"一键确认全部"复用同一份逻辑，
+// 不重复写"POST状态、拿linked_obstacles、判断要不要弹消消乐提示"这一整套。
+async function confirmSuggestion(s, row) {
+  const url = '/api/topic/' + encodeURIComponent(currentTopic) + '/thread/' + encodeURIComponent(s.thread_label)
+    + '/status?record_type=' + encodeURIComponent(s.record_type);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'resolved' }),
+  });
+  const data = await res.json().catch(() => ({}));
+  const typeLabel = TYPE_LABEL[s.record_type] || s.record_type;
+  row.dataset.confirmed = '1';
+  row.innerHTML = '';
+  const confirmed = document.createElement('span');
+  confirmed.className = 'suggestion-confirmed';
+  confirmed.textContent = `[${typeLabel}] ${s.thread_label}（已确认标记）`;
+  row.appendChild(confirmed);
+  if (s.record_type === 'want' && data.linked_obstacles && data.linked_obstacles.length) {
+    showCascadeToast(currentTopic, [{ wantLabel: s.thread_label, obstacles: data.linked_obstacles }]);
+  }
+}
+
 function renderResolveSuggestions(suggestions) {
   const box = document.getElementById('resolve-suggestions');
   box.innerHTML = '';
@@ -1288,34 +1325,43 @@ function renderResolveSuggestions(suggestions) {
   title.textContent = `AI从这份报告里找到 ${suggestions.length} 条看起来已经完全兑现的关注线，确认了才会真的改状态：`;
   box.appendChild(title);
 
+  const rows = [];
   suggestions.forEach(s => {
     const row = document.createElement('div');
     row.className = 'suggestion-row';
+    const typeLabel = TYPE_LABEL[s.record_type] || s.record_type;
     const labelEl = document.createElement('span');
     labelEl.className = 'suggestion-label';
-    labelEl.textContent = s.thread_label;
+    labelEl.textContent = `[${typeLabel}] ${s.thread_label}`;
     const confirmBtn = document.createElement('span');
     confirmBtn.className = 'status-toggle-btn';
     confirmBtn.textContent = '✓ 确认标记已解决';
-    confirmBtn.onclick = async () => {
-      const url = '/api/topic/' + encodeURIComponent(currentTopic) + '/thread/' + encodeURIComponent(s.thread_label)
-        + '/status?record_type=' + encodeURIComponent(s.record_type);
-      await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'resolved' }),
-      });
-      row.innerHTML = '';
-      const confirmed = document.createElement('span');
-      confirmed.className = 'suggestion-confirmed';
-      confirmed.textContent = s.thread_label + '（已确认标记）';
-      row.appendChild(confirmed);
-      refreshTopicDetail(currentTopic, true);
+    confirmBtn.onclick = () => {
+      confirmBtn.style.pointerEvents = 'none';
+      confirmSuggestion(s, row).then(() => refreshTopicDetail(currentTopic, true));
     };
     row.appendChild(labelEl);
     row.appendChild(confirmBtn);
     box.appendChild(row);
+    rows.push({ s, row });
   });
+
+  if (suggestions.length > 1) {
+    const allBtn = document.createElement('span');
+    allBtn.className = 'status-toggle-btn suggestions-confirm-all';
+    allBtn.textContent = `✓ 一键确认全部（${suggestions.length}条）`;
+    allBtn.onclick = async () => {
+      allBtn.style.pointerEvents = 'none';
+      allBtn.textContent = '确认中…';
+      for (const { s, row } of rows) {
+        if (row.dataset.confirmed === '1') continue; // 已经被单独确认过的行跳过
+        await confirmSuggestion(s, row);
+      }
+      allBtn.remove();
+      refreshTopicDetail(currentTopic, true);
+    };
+    box.insertBefore(allBtn, box.firstChild.nextSibling);
+  }
 }
 
 document.getElementById('synth-btn').onclick = () => runReport('synthesis');

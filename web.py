@@ -218,7 +218,7 @@ def api_topic_implementation(topic_label):
     return jsonify({
         "result": result,
         "report": entry,
-        "suggested_resolved_threads": [{"thread_label": t, "record_type": "node"} for t in suggested],
+        "suggested_resolved_threads": suggested,
     })
 
 
