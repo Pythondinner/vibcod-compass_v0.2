@@ -126,18 +126,22 @@ def _render(feature_label: str, understanding: str, nodes: list[dict], checks: l
     return "\n".join(lines)
 
 
-def check_feature(topic_label: str, feature_label: str, project_path: str) -> str:
+def check_feature(topic_label: str, feature_label: str, project_path: str) -> dict:
+    """返回{"text": 给人看的完整判断文字, "verdict": 已实现/部分实现/未实现/无法判断/None}。
+    verdict单独拎出来是为了让调用方（比如确认流程）能用代码判断"这次要不要提示用户确认"，
+    不用去解析text里那行【结论：...】的字符串。verdict为None代表流程本身失败了
+    （功能不存在/读不到代码/模型没输出合法JSON），跟"无法判断"这个真实判断结果是两回事。"""
     history = feature_ledger.get_history(topic_label)
     feature_records = [h for h in history if h["record_type"] == "feature" and h["label"] == feature_label]
     if not feature_records:
-        return f"'{topic_label}'下没有名为'{feature_label}'的功能记录。"
+        return {"text": f"'{topic_label}'下没有名为'{feature_label}'的功能记录。", "verdict": None}
     feature_content = feature_records[-1]["content"]
 
     nodes = [h for h in history if h["record_type"] == "node" and h["label"] == feature_label]
 
     code = read_code_for_check(project_path)
     if not code:
-        return f"在'{project_path}'下没有读到任何源码文件，无法比对。"
+        return {"text": f"在'{project_path}'下没有读到任何源码文件，无法比对。", "verdict": None}
 
     prompt = (
         VERIFY_PROMPT.replace("__FEATURE_LABEL__", feature_label)
@@ -158,7 +162,7 @@ def check_feature(topic_label: str, feature_label: str, project_path: str) -> st
     try:
         data = json.loads(reply)
     except json.JSONDecodeError:
-        return f"（模型返回的不是合法JSON，原始内容如下）\n{reply}"
+        return {"text": f"（模型返回的不是合法JSON，原始内容如下）\n{reply}", "verdict": None}
 
     understanding = data.get("understanding", "")
     checks = data.get("decision_checks", [])
@@ -169,7 +173,7 @@ def check_feature(topic_label: str, feature_label: str, project_path: str) -> st
     # 硬约束在这里执行：decision_checks只取跟nodes数量对应的前N条，多出来的丢弃不采信。
     checks = checks[: len(nodes)]
 
-    return _render(feature_label, understanding, nodes, checks, overall)
+    return {"text": _render(feature_label, understanding, nodes, checks, overall), "verdict": overall}
 
 
 if __name__ == "__main__":
@@ -178,4 +182,4 @@ if __name__ == "__main__":
     if len(sys.argv) < 4:
         print("用法: python verify.py <topic_label> <feature_label> <project_path>")
         sys.exit(1)
-    print(check_feature(sys.argv[1], sys.argv[2], sys.argv[3]))
+    print(check_feature(sys.argv[1], sys.argv[2], sys.argv[3])["text"])

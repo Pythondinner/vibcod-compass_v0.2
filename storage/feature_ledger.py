@@ -160,6 +160,49 @@ def set_last_checked(topic_label: str, ts: str, db_path: str = DB_PATH) -> None:
     conn.close()
 
 
+def migrate_topic(old_cwd: str, new_cwd: str, db_path: str = DB_PATH) -> dict:
+    """项目文件夹改名之后，把老topic_label(旧路径)下的全部记录搬到新topic_label(新路径)下——
+    这是"cwd当身份"这个设计已知的代价：文件夹一改名，topic_label就变了，不搬的话历史就跟
+    新路径断开。不自动检测改名（改名频率低，检测的复杂度不值得），需要用户手动触发。
+
+    **重要限制**：这个函数只搬feature_records和check_progress这两张表里已经落地的数据，
+    不动turns/目录下还没被check_now()处理过的原始对话——那些行里存的cwd还是旧路径的
+    字符串，改名之后get_paired_turns_for_topic(新路径)找不到它们，会变成孤儿数据。
+    所以正确的操作顺序是：改名前先跑一次check_now()把积压的对话清空，改完名再调这个函数。
+    """
+    old_topic = normalize_topic(old_cwd)
+    new_topic = normalize_topic(new_cwd)
+    conn = get_connection(db_path)
+
+    cur = conn.execute(
+        "UPDATE feature_records SET topic_label=? WHERE topic_label=?",
+        (new_topic, old_topic),
+    )
+    moved = cur.rowcount
+
+    old_progress = conn.execute(
+        "SELECT last_checked_ts FROM check_progress WHERE topic_label=?", (old_topic,)
+    ).fetchone()
+    if old_progress:
+        new_progress = conn.execute(
+            "SELECT last_checked_ts FROM check_progress WHERE topic_label=?", (new_topic,)
+        ).fetchone()
+        # 新路径理论上不该已经有游标(刚改名，没检查过)，但防御一下：真有的话保留较晚的时间戳，
+        # 不要用旧路径的游标覆盖掉可能更新的进度。
+        candidates = [t for t in (old_progress["last_checked_ts"], new_progress["last_checked_ts"] if new_progress else None) if t]
+        merged_ts = max(candidates) if candidates else None
+        conn.execute(
+            "INSERT INTO check_progress (topic_label, last_checked_ts, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(topic_label) DO UPDATE SET last_checked_ts=excluded.last_checked_ts, updated_at=excluded.updated_at",
+            (new_topic, merged_ts, _now()),
+        )
+        conn.execute("DELETE FROM check_progress WHERE topic_label=?", (old_topic,))
+
+    conn.commit()
+    conn.close()
+    return {"old_topic": old_topic, "new_topic": new_topic, "records_moved": moved}
+
+
 def set_feature_status(topic_label: str, feature_label: str, status: str, db_path: str = DB_PATH) -> bool:
     """人工确认一个功能的完成状态——不是intake/verify自动写的，是"AI建议、人工确认"这条原则
     落地的地方：verify.py只返回判断文字，从不自己改这个字段，只有用户看过判断之后主动确认，

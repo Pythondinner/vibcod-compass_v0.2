@@ -164,24 +164,49 @@ def check_now(cwd: str) -> dict:
     }
 
 
+def _confirm_loop(topic_label: str, verify_results: dict) -> None:
+    """"AI建议、人工确认"这条原则在CLI阶段的落地——只有verify.py判断出"已实现"的功能才问，
+    部分实现/未实现/无法判断没有什么好确认的，不问。真正写库的set_feature_status()只在
+    用户明确输入y之后才调用，AI自己从来不直接改状态。"""
+    for label, result in verify_results.items():
+        print(f"\n=== {label} ===\n{result['text']}")
+        if result["verdict"] != "已实现":
+            continue
+        answer = input(f"\n『{label}』核对结果是已实现，要标记为完成状态吗？[y/N] ").strip().lower()
+        if answer == "y":
+            ok = feature_ledger.set_feature_status(topic_label, label, "resolved")
+            print("已标记完成" if ok else "标记失败：找不到这个功能")
+        else:
+            print("跳过，状态不变")
+
+
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("用法: python intake.py <cwd> [--check]")
-        print("  不带--check：只显示待处理数量，不调模型")
-        print("  带--check：真正触发一次检查")
+        print("用法: python intake.py <cwd> [--check] [--migrate <新cwd>]")
+        print("  不带参数：只显示待处理数量，不调模型")
+        print("  --check：真正触发一次检查，已实现的功能会问要不要标记完成")
+        print("  --migrate <新cwd>：项目文件夹改名后，把旧路径下的记录搬到新路径")
         sys.exit(1)
 
     feature_ledger.init_db()
     cwd_arg = sys.argv[1]
-    if "--check" in sys.argv:
+
+    if "--migrate" in sys.argv:
+        idx = sys.argv.index("--migrate")
+        if idx + 1 >= len(sys.argv):
+            print("用法: python intake.py <旧cwd> --migrate <新cwd>")
+            sys.exit(1)
+        new_cwd = sys.argv[idx + 1]
+        r = feature_ledger.migrate_topic(cwd_arg, new_cwd)
+        print(f"已把{r['records_moved']}条记录从'{r['old_topic']}'搬到'{r['new_topic']}'")
+    elif "--check" in sys.argv:
         r = check_now(cwd_arg)
         print(f"处理了{r['new_turns']}轮新对话")
         if r["extraction"]:
             print(f"新功能{len(r['extraction']['features'])}个, 新卡点{len(r['extraction']['obstacles'])}个, 新决定{len(r['extraction']['nodes'])}条")
-        for label, verdict in r["verify_results"].items():
-            print(f"\n=== {label} ===\n{verdict}")
+        _confirm_loop(r["topic_label"], r["verify_results"])
     else:
         p = count_pending(cwd_arg)
         print(f"话题: {p['topic_label']}")
