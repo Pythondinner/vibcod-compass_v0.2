@@ -159,6 +159,10 @@
   .pile-item:first-child { border-top: none; padding-top: 0; }
   .pile-label { font-weight: 700; color: var(--obstacle); flex-shrink: 0; }
   .pile-content { color: var(--text); flex: 1; min-width: 0; }
+  .pile-link { font-size: 11px; color: var(--muted); }
+
+  /* obstacle关联着的具体want线("消消乐"联动关系的展示,不是新按钮) */
+  .thread-link-badge { font-size: 10.5px; color: var(--muted); flex-shrink: 0; white-space: nowrap; }
 
   /* 优先级标记:现在做/先放一边,纯用户手动打,AI不参与 */
   .priority-badge {
@@ -312,6 +316,26 @@
   .suggestion-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; }
   .suggestion-label { color: var(--text); }
   .suggestion-confirmed { color: var(--muted); font-style: italic; }
+
+  /* "消消乐"悬浮提示:标完一条特点已解决之后,问要不要顺便标掉关联的卡点 */
+  #cascade-toast {
+    position: fixed; bottom: 24px; right: 24px; width: 320px; max-height: 60vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid rgba(166,218,149,0.35); border-radius: 10px;
+    padding: 14px 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.35); z-index: 50;
+  }
+  .cascade-title { font-size: 12.5px; font-weight: 700; color: var(--node); line-height: 1.5; margin-bottom: 10px; padding-right: 18px; position: relative; }
+  .cascade-close { position: absolute; top: -2px; right: -4px; cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 400; }
+  .cascade-close:hover { color: var(--text); }
+  .cascade-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 7px 0; border-top: 1px dashed var(--border); font-size: 12px;
+  }
+  .cascade-row-text { color: var(--text); flex: 1; min-width: 0; }
+  .cascade-btn {
+    flex-shrink: 0; background: rgba(166,218,149,0.15); color: var(--node); border: 1px solid var(--node);
+    border-radius: 6px; padding: 3px 9px; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .cascade-btn:hover { background: rgba(166,218,149,0.28); }
 
   .rp-history-title { font-size: 13px; color: var(--muted); font-weight: 700; margin: 18px 0 10px; border-top: 1px solid var(--border); padding-top: 16px; }
   .report-item { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
@@ -781,12 +805,18 @@ function renderStatusToggle(container, topicName, thread) {
     + '/status?record_type=' + encodeURIComponent(rt);
 
   async function setStatus(status) {
-    await fetch(statusUrl, {
+    const res = await fetch(statusUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
+    const data = await res.json().catch(() => ({}));
     if (currentTopic) refreshTopicDetail(currentTopic, true);
+    // "消消乐":标resolved的是一条特点(want)、又有关联着它且还没解决的卡点时，
+    // 弹出来问要不要顺便也标掉——只是建议，判断权还是用户的，不自动清。
+    if (status === 'resolved' && rt === 'want' && data.linked_obstacles && data.linked_obstacles.length) {
+      showCascadeToast(topicName, label, data.linked_obstacles);
+    }
   }
 
   function render() {
@@ -805,6 +835,54 @@ function renderStatusToggle(container, topicName, thread) {
     container.appendChild(actionBtn);
   }
   render();
+}
+
+// ---------- "消消乐":标掉一条特点后,顺带问要不要标掉关联的卡点 ----------
+// 用悬浮toast而不是就地渲染——就地渲染的容器会被refreshTopicDetail整体重建,
+// 提示会跟着一起消失,悬浮在body上不受那次重渲染影响。同一时间只保留一个toast。
+function showCascadeToast(topicName, wantLabel, obstacles) {
+  const old = document.getElementById('cascade-toast');
+  if (old) old.remove();
+
+  const box = document.createElement('div');
+  box.id = 'cascade-toast';
+  const title = document.createElement('div');
+  title.className = 'cascade-title';
+  title.textContent = `特点「${wantLabel}」已标记解决，关联的卡点要不要也一起清掉？`;
+  const closeBtn = document.createElement('span');
+  closeBtn.className = 'cascade-close';
+  closeBtn.textContent = '✕';
+  closeBtn.onclick = () => box.remove();
+  title.appendChild(closeBtn);
+  box.appendChild(title);
+
+  obstacles.forEach(ob => {
+    const row = document.createElement('div');
+    row.className = 'cascade-row';
+    const text = document.createElement('span');
+    text.className = 'cascade-row-text';
+    text.textContent = `${ob.thread_label}：${ob.content}`;
+    const btn = document.createElement('button');
+    btn.className = 'cascade-btn';
+    btn.textContent = '顺便标掉';
+    btn.onclick = async () => {
+      const url = '/api/topic/' + encodeURIComponent(topicName) + '/thread/' + encodeURIComponent(ob.thread_label)
+        + '/status?record_type=obstacle';
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'resolved' }),
+      });
+      row.remove();
+      if (currentTopic) refreshTopicDetail(currentTopic, true);
+      if (!box.querySelector('.cascade-row')) box.remove();
+    };
+    row.appendChild(text);
+    row.appendChild(btn);
+    box.appendChild(row);
+  });
+
+  document.body.appendChild(box);
 }
 
 // ---------- 摘要卡片:want是"一段一段的特点总结",obstacle是"堆积式列表" ----------
@@ -889,6 +967,13 @@ function buildPileItem(topicName, t) {
   const contentEl = document.createElement('span');
   contentEl.className = 'pile-content';
   contentEl.textContent = t.content;
+  if (t.related_want_thread) {
+    const linkEl = document.createElement('span');
+    linkEl.className = 'pile-link';
+    linkEl.textContent = '关联特点：' + t.related_want_thread;
+    contentEl.appendChild(document.createElement('br'));
+    contentEl.appendChild(linkEl);
+  }
   const statusCtrl = document.createElement('span');
   const ctrl = document.createElement('span');
   ctrl.className = 'priority-controls';
@@ -957,6 +1042,7 @@ function renderThreadRows(topicName, threads) {
       <div class="thread-head">
         <span class="thread-type-badge ${t.record_type}">${TYPE_LABEL[t.record_type] || t.record_type}</span>
         <span class="thread-label">${escapeHtml(t.thread_label)}</span>
+        ${t.related_want_thread ? `<span class="thread-link-badge">→ ${escapeHtml(t.related_want_thread)}</span>` : ''}
         <span class="thread-status-toggle"></span>
         <span class="priority-controls thread-priority-controls"></span>
         <span class="thread-preview">${escapeHtml(t.content)}</span>

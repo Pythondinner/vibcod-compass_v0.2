@@ -84,6 +84,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE records ADD COLUMN thread_label TEXT")
     if "thread_status" not in existing_cols:
         conn.execute("ALTER TABLE records ADD COLUMN thread_status TEXT")
+    if "related_want_thread" not in existing_cols:
+        conn.execute("ALTER TABLE records ADD COLUMN related_want_thread TEXT")
 
 
 def init_db(db_path: str = DB_PATH) -> None:
@@ -107,6 +109,7 @@ def insert_record(
     want_thread_status: str | None = None,
     obstacle_thread: str | None = None,
     obstacle_thread_status: str | None = None,
+    obstacle_related_want_thread: str | None = None,
     node_thread: str | None = None,
     node_thread_status: str | None = None,
     db_path: str = DB_PATH,
@@ -129,9 +132,20 @@ def insert_record(
 
     if obstacle:
         conn.execute(
-            "INSERT OR IGNORE INTO records (record_type, topic_label, content, source_excerpt, source_start_ts, source_end_ts, session_id, created_at, thread_label, thread_status) "
-            "VALUES ('obstacle', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (topic_label, obstacle, source_excerpt, source_start_ts, source_end_ts, session_id, now, obstacle_thread, obstacle_thread_status),
+            "INSERT OR IGNORE INTO records (record_type, topic_label, content, source_excerpt, source_start_ts, source_end_ts, session_id, created_at, thread_label, thread_status, related_want_thread) "
+            "VALUES ('obstacle', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                topic_label,
+                obstacle,
+                source_excerpt,
+                source_start_ts,
+                source_end_ts,
+                session_id,
+                now,
+                obstacle_thread,
+                obstacle_thread_status,
+                obstacle_related_want_thread,
+            ),
         )
         inserted.append("obstacle")
 
@@ -275,6 +289,31 @@ def get_threads(topic_label: str, db_path: str = DB_PATH) -> list[dict]:
         threads.append(entry)
     conn.close()
     return threads
+
+
+def get_linked_obstacles(topic_label: str, want_thread_label: str, db_path: str = DB_PATH) -> list[dict]:
+    """反查：哪些卡点关注线关联着这条特点线，且目前还没被标resolved——提取时AI只在obstacle
+    这一侧判断"这个卡点是不是在挡某条具体的特点"（related_want_thread字段），want自己不知道
+    谁关联了它，所以要反查。用于"消消乐"联动：把一条特点标已解决时，找出还没解决的关联卡点，
+    交给上层提示用户要不要顺便也标掉——只反查不联动写库，是不是标全由用户点确认。"""
+    conn = get_connection(db_path)
+    labels = conn.execute(
+        "SELECT DISTINCT thread_label FROM records "
+        "WHERE topic_label=? AND record_type='obstacle' AND related_want_thread=?",
+        (topic_label, want_thread_label),
+    ).fetchall()
+    linked = []
+    for row in labels:
+        thread_label = row["thread_label"]
+        latest = conn.execute(
+            "SELECT * FROM records WHERE topic_label=? AND record_type='obstacle' AND thread_label=? "
+            "ORDER BY source_end_ts DESC, id DESC LIMIT 1",
+            (topic_label, thread_label),
+        ).fetchone()
+        if latest and latest["thread_status"] != "resolved":
+            linked.append({"thread_label": thread_label, "content": latest["content"]})
+    conn.close()
+    return linked
 
 
 def get_thread_history(

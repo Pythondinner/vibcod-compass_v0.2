@@ -50,6 +50,7 @@ checkpoint里want完全可能在推进"MCP参数改造"这条全新的线，obst
 - "obstacle": 字符串或null —— 同样的更新原则：变了才输出，没变设为null，**同样要求一到两句话，只说清楚当前最主要卡在哪，不要罗列所有子问题**。
 - "obstacle_thread": 字符串或null —— obstacle非null时必填。
 - "obstacle_thread_status": "resolved"或null。
+- "obstacle_related_want_thread": 字符串或null —— 判断这条obstacle是不是明显在阻挡某一条**具体**的want关注线（上面关注线列表里`[want]`开头的某条，或者你在这次同一个JSON里刚给出的want_thread）。是的话把那条want线的thread_label原样填进来；如果这条obstacle是通用/跨多个特点的卡点，或者看不出明确对应哪一个具体特点，就留null——不要为了填而勉强找一个凑数，宁可漏标也不要标错，这是可选的松散关联，不是强制配对。
 - "node": 对象（{"decision": "...", "reason": "..."}）或null —— 如果发生了一个新的决定/结论，这里可以包含具体细节，不受"简洁"的约束——细节应该沉淀在这里，不是在want/obstacle里。
 - "node_thread": 字符串或null —— node非null时必填。
 - "node_thread_status": "resolved"或null。
@@ -133,7 +134,7 @@ def format_threads_state(threads_state: dict[str, list[dict]]) -> str:
         if not threads:
             continue
         thread_desc = "；".join(
-            f"「{t['thread_label']}」({t.get('thread_status') or 'open'}): {t['content'][:40]}"
+            f"[{t.get('record_type', '?')}]「{t['thread_label']}」({t.get('thread_status') or 'open'}): {t['content'][:40]}"
             for t in threads
         )
         lines.append(f"- {topic}: {thread_desc}")

@@ -68,6 +68,7 @@ def run_once(transcript_path: str, session_id: str, n: int) -> int:
                     want_thread_status=rec.get("want_thread_status"),
                     obstacle_thread=rec.get("obstacle_thread"),
                     obstacle_thread_status=rec.get("obstacle_thread_status"),
+                    obstacle_related_want_thread=rec.get("obstacle_related_want_thread"),
                     node_thread=rec.get("node_thread"),
                     node_thread_status=rec.get("node_thread_status"),
                 )

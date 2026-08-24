@@ -119,6 +119,7 @@ def api_topic_detail(topic_label):
                 "content": t["content"],
                 "source_end_ts": t["source_end_ts"],
                 "record_count": t["record_count"],
+                "related_want_thread": t["related_want_thread"] if t["record_type"] == "obstacle" else None,
             }
             for t in sorted(ledger.get_threads(topic_label), key=lambda t: t["source_end_ts"] or "", reverse=True)
         ],
@@ -170,7 +171,13 @@ def api_thread_priority(topic_label, thread_label):
 @app.route("/api/topic/<path:topic_label>/thread/<path:thread_label>/status", methods=["POST"])
 def api_thread_status(topic_label, thread_label):
     """手动把一条线标成resolved/open——resolved的唯一来源本来是AI在提取时看到对话里明说
-    "解决了"，大量真实完成是安静的、没人在对话里宣布，这个入口让用户自己纠正。"""
+    "解决了"，大量真实完成是安静的、没人在对话里宣布，这个入口让用户自己纠正。
+
+    "消消乐"联动：如果标resolved的是一条want线（特点），顺手查一下有没有关联着它、还没解决的
+    obstacle线（提取时AI判断的可选关联，见related_want_thread），有的话一并返回给前端，
+    由前端弹出来问"要不要顺便也标掉"——只返回建议，不自动写库，跟AI建议已解决走的是同一条
+    "判断权留给用户"的原则，不因为这次的关联信号更具体就破例自动清。反方向（标resolved一条
+    obstacle）不触发联动：卡点解决了不代表对应的特点就完整做完了，不能反推。"""
     record_type = request.args.get("record_type")
     if not record_type:
         return jsonify({"error": "缺少record_type"}), 400
@@ -181,7 +188,11 @@ def api_thread_status(topic_label, thread_label):
     ok = ledger.mark_thread_status(topic_label, record_type, thread_label, status)
     if not ok:
         return jsonify({"error": "没找到这条线"}), 404
-    return jsonify({"ok": True})
+
+    linked_obstacles = []
+    if status == "resolved" and record_type == "want":
+        linked_obstacles = ledger.get_linked_obstacles(topic_label, thread_label)
+    return jsonify({"ok": True, "linked_obstacles": linked_obstacles})
 
 
 @app.route("/api/topic/<path:topic_label>/drift", methods=["POST"])
@@ -353,6 +364,11 @@ def api_delete_report(report_id):
 
 
 if __name__ == "__main__":
+    # 之前只有run.py/monitor.py的入口会调init_db,单独跑web.py(比如只接了Hook、
+    # 还没手动跑过run.py)时新加的表/字段不会被建出来——这次加related_want_thread字段时
+    # 真实撞到了：本地notebook.db已经很久没被run.py的__main__碰过,新字段缺失。
+    # 这里补上,保证只启动web.py也能拿到最新schema,不用记着"记得先跑一次run.py"。
+    ledger.init_db()
     threading.Thread(target=_discovery_loop, daemon=True).start()
 
     # use_reloader=False：debug模式默认的自动重载会在源文件变化时重启进程，
