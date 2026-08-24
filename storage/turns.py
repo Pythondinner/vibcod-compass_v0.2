@@ -98,6 +98,29 @@ def list_session_ids() -> list[str]:
     return [f[:-6] for f in os.listdir(TURNS_DIR) if f.endswith(".jsonl")]
 
 
+def list_known_cwds() -> list[str]:
+    """扫全部session文件，找出真实出现过的cwd集合——给网页界面列"接入过Hook、有真实对话
+    的项目"用，不依赖session_registry.py（那个是老系统cwd路由用的，这次新管道没有引用它）。
+    直接扫原始行（不是配对完的turns），因为cwd只出现在user那一行，只要Hook真的抓到过
+    UserPromptSubmit就该被看见，不用等这一轮凑齐assistant那半。"""
+    seen: set[str] = set()
+    for sid in list_session_ids():
+        path = _log_file_for(sid)
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                cwd = rec.get("cwd")
+                if cwd:
+                    seen.add(cwd)
+    return sorted(seen)
+
+
 def get_paired_turns_for_topic(topic_label: str) -> list[dict]:
     """跨所有session扫一遍，只留cwd标准化之后等于这个topic_label的完整轮次，按时间排序。
     "检查一下这个项目"是围绕项目、不是围绕单次会话的——同一个项目可能被开过很多次

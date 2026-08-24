@@ -129,6 +129,13 @@ def get_known(topic_label: str, record_type: str, db_path: str = DB_PATH) -> lis
     return result
 
 
+def get_known_topics(db_path: str = DB_PATH) -> list[str]:
+    conn = get_connection(db_path)
+    rows = conn.execute("SELECT DISTINCT topic_label FROM feature_records ORDER BY topic_label").fetchall()
+    conn.close()
+    return [r["topic_label"] for r in rows]
+
+
 def get_history(topic_label: str, db_path: str = DB_PATH) -> list[dict]:
     conn = get_connection(db_path)
     rows = conn.execute(

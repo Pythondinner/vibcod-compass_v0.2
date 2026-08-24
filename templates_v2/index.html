@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>罗盘 v2 · 功能集合体</title>
+<style>
+  :root {
+    --bg: #14161c;
+    --panel: #1c1f28;
+    --panel-2: #22262f;
+    --border: #2c3040;
+    --text: #dfe3ee;
+    --muted: #7d8399;
+    --accent: #5b8cff;
+    --accent-soft: rgba(91,140,255,0.12);
+    --good: #4fd1a5;
+    --good-soft: rgba(79,209,165,0.12);
+    --warn: #ed8796;
+    --warn-soft: rgba(237,135,150,0.12);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  #sidebar { width: 280px; background: var(--panel); border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0; }
+  #sidebar h1 { font-size: 14px; padding: 16px 16px 10px; margin: 0; color: var(--muted); font-weight: 700; letter-spacing: 0.5px; }
+  .project-item { padding: 12px 16px; cursor: pointer; border-left: 3px solid transparent; }
+  .project-item:hover { background: rgba(255,255,255,0.04); }
+  .project-item.active { background: rgba(255,255,255,0.06); border-left-color: var(--accent); }
+  .project-name { font-size: 13px; font-weight: 600; word-break: break-all; }
+  .project-meta { font-size: 11.5px; color: var(--muted); margin-top: 4px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .pending-badge { color: var(--accent); }
+  .project-empty { padding: 16px; font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+
+  #attach-box { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  #attach-box input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px 9px; color: var(--text); font-size: 12px; margin-bottom: 8px; box-sizing: border-box;
+  }
+  #attach-box button {
+    width: 100%; background: var(--accent); color: #0c1220; border: none; border-radius: 6px;
+    padding: 7px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  }
+  #attach-box button:hover { opacity: 0.85; }
+  #attach-msg { font-size: 11px; margin-top: 6px; line-height: 1.5; }
+
+  #main { flex: 1; overflow-y: auto; padding: 32px 40px; min-width: 0; }
+  #empty { color: var(--muted); font-size: 14px; }
+
+  .proj-header { margin-bottom: 20px; }
+  .proj-path { font-size: 20px; font-weight: 700; word-break: break-all; margin-bottom: 8px; }
+  .hook-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; padding: 3px 9px; border-radius: 10px; font-weight: 600; }
+  .hook-status.attached { background: var(--good-soft); color: var(--good); }
+  .hook-status.not-attached { background: var(--warn-soft); color: var(--warn); }
+
+  .status-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 18px; margin-bottom: 28px;
+  }
+  .status-text { font-size: 13px; color: var(--muted); }
+  .status-text strong { color: var(--text); font-variant-numeric: tabular-nums; }
+  #check-btn {
+    background: var(--accent); color: #0c1220; border: none; border-radius: 8px;
+    padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
+  }
+  #check-btn:hover { opacity: 0.88; }
+  #check-btn:disabled { opacity: 0.5; cursor: default; }
+
+  .check-result {
+    background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 14px 18px; margin-bottom: 24px; font-size: 12.5px; line-height: 1.6;
+  }
+  .check-result .title { font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+
+  h2.section-title {
+    font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted);
+    font-weight: 700; margin: 0 0 14px;
+  }
+
+  .feature-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin-bottom: 14px;
+  }
+  .feature-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+  .feature-label { font-size: 15px; font-weight: 700; }
+  .status-pill { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 8px; flex-shrink: 0; white-space: nowrap; }
+  .status-pill.open { background: rgba(255,255,255,0.06); color: var(--muted); }
+  .status-pill.resolved { background: var(--good-soft); color: var(--good); }
+  .feature-desc { font-size: 13px; color: var(--muted); margin-bottom: 12px; line-height: 1.6; }
+
+  .node-list { display: flex; flex-direction: column; gap: 8px; }
+  .node-item { padding-left: 12px; border-left: 2px solid var(--border); font-size: 12.5px; line-height: 1.6; }
+  .node-reason { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+
+  .verify-box {
+    margin-top: 14px; padding: 12px 14px; background: var(--panel-2); border-radius: 8px;
+    font-size: 12px; line-height: 1.6; white-space: pre-wrap;
+  }
+  .verify-verdict { font-weight: 700; margin-bottom: 6px; }
+  .verify-verdict.已实现 { color: var(--good); }
+  .verify-verdict.部分实现 { color: var(--accent); }
+  .verify-verdict.未实现 { color: var(--warn); }
+  .confirm-btn {
+    margin-top: 10px; background: var(--good-soft); color: var(--good); border: 1px solid var(--good);
+    border-radius: 6px; padding: 5px 12px; font-size: 11.5px; font-weight: 700; cursor: pointer;
+  }
+  .confirm-btn:hover { background: rgba(79,209,165,0.22); }
+  .confirm-btn:disabled { opacity: 0.5; cursor: default; }
+
+  .pile-item {
+    display: flex; align-items: baseline; gap: 10px; padding: 8px 0; font-size: 13px; line-height: 1.6;
+    border-top: 1px dashed var(--border);
+  }
+  .pile-item:first-child { border-top: none; }
+  .pile-label { font-weight: 700; color: var(--warn); flex-shrink: 0; }
+  .pile-content { color: var(--text); flex: 1; min-width: 0; }
+  .pile-link { font-size: 11px; color: var(--muted); margin-left: 8px; }
+  .pile-status { flex-shrink: 0; }
+
+  .empty-hint { color: var(--muted); font-size: 12.5px; font-style: italic; }
+  section { margin-bottom: 32px; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>罗盘 v2 · 项目</h1>
+  <div id="attach-box">
+    <input id="attach-path" type="text" placeholder="项目文件夹完整路径">
+    <button id="attach-btn">接上Hook</button>
+    <div id="attach-msg"></div>
+  </div>
+  <div id="project-list"></div>
+</div>
+
+<div id="main">
+  <div id="empty">左侧选一个项目查看，或者先接上一个新项目的Hook。</div>
+  <div id="project-view" style="display:none"></div>
+</div>
+
+<script>
+let currentTopic = null;
+let currentProjects = [];
+
+async function loadProjects() {
+  const res = await fetch('/api/projects');
+  currentProjects = await res.json();
+  const list = document.getElementById('project-list');
+  list.innerHTML = '';
+  if (!currentProjects.length) {
+    list.innerHTML = '<div class="project-empty">还没有任何项目接过Hook，或者有Hook但从来没触发过。先在上面填个路径接一个。</div>';
+    return;
+  }
+  currentProjects.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'project-item' + (p.topic_label === currentTopic ? ' active' : '');
+    const shortName = p.topic_label.split(/[\\/]/).filter(Boolean).pop() || p.topic_label;
+    item.innerHTML = `
+      <div class="project-name">${escapeHtml(shortName)}</div>
+      <div class="project-meta">
+        <span>${p.feature_count}个功能</span>
+        ${p.pending_turns > 0 || p.pending_edits > 0 ? `<span class="pending-badge">待检查 ${p.pending_turns}对话/${p.pending_edits}改动</span>` : ''}
+      </div>
+    `;
+    item.onclick = () => selectProject(p.topic_label);
+    list.appendChild(item);
+  });
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+async function selectProject(topic) {
+  currentTopic = topic;
+  document.getElementById('empty').style.display = 'none';
+  document.getElementById('project-view').style.display = 'block';
+  await loadProjects();
+  await renderProject();
+}
+
+async function renderProject() {
+  const res = await fetch('/api/project/' + encodeURIComponent(currentTopic));
+  const data = await res.json();
+  const view = document.getElementById('project-view');
+
+  const hookBadge = data.hook_attached
+    ? '<span class="hook-status attached">● Hook已接入</span>'
+    : '<span class="hook-status not-attached">○ Hook未接入</span>';
+
+  let html = `
+    <div class="proj-header">
+      <div class="proj-path">${escapeHtml(currentTopic)}</div>
+      ${hookBadge}
+    </div>
+    <div class="status-bar">
+      <div class="status-text">距离上次确认：<strong>${data.pending.pending_turns}</strong>轮对话，<strong>${data.pending.pending_edits}</strong>次代码改动
+        ${data.pending.last_checked ? `<br>上次确认时间：${new Date(data.pending.last_checked).toLocaleString('zh-CN')}` : '<br>（从未确认过）'}
+      </div>
+      <button id="check-btn">检查一下</button>
+    </div>
+    <div id="check-result-box"></div>
+    <section>
+      <h2 class="section-title">功能（${data.features.length}）</h2>
+      <div id="feature-list"></div>
+    </section>
+    <section>
+      <h2 class="section-title">卡点堆积（${data.obstacles.length}）</h2>
+      <div id="obstacle-list"></div>
+    </section>
+  `;
+  if (data.unlinked_nodes.length) {
+    html += `
+    <section>
+      <h2 class="section-title">未挂靠具体功能的决定（${data.unlinked_nodes.length}）</h2>
+      <div id="unlinked-node-list"></div>
+    </section>`;
+  }
+
+  view.innerHTML = html;
+
+  const featureList = document.getElementById('feature-list');
+  if (!data.features.length) {
+    featureList.innerHTML = '<div class="empty-hint">还没有记录任何功能</div>';
+  } else {
+    data.features.forEach(f => featureList.appendChild(buildFeatureCard(f)));
+  }
+
+  const obstacleList = document.getElementById('obstacle-list');
+  if (!data.obstacles.length) {
+    obstacleList.innerHTML = '<div class="empty-hint">还没有记录任何卡点</div>';
+  } else {
+    data.obstacles.forEach(o => obstacleList.appendChild(buildPileItem(o)));
+  }
+
+  if (data.unlinked_nodes.length) {
+    const unlinkedList = document.getElementById('unlinked-node-list');
+    data.unlinked_nodes.forEach(n => unlinkedList.appendChild(buildNodeItem(n)));
+  }
+
+  document.getElementById('check-btn').onclick = runCheck;
+}
+
+function buildFeatureCard(f) {
+  const card = document.createElement('div');
+  card.className = 'feature-card';
+  const statusLabel = f.status === 'resolved' ? '已完成' : '进行中';
+  card.innerHTML = `
+    <div class="feature-head">
+      <span class="feature-label">${escapeHtml(f.label)}</span>
+      <span class="status-pill ${f.status === 'resolved' ? 'resolved' : 'open'}">${statusLabel}</span>
+    </div>
+    <div class="feature-desc">${escapeHtml(f.content)}</div>
+    <div class="node-list"></div>
+  `;
+  const nodeList = card.querySelector('.node-list');
+  (f.nodes || []).forEach(n => nodeList.appendChild(buildNodeItem(n)));
+  return card;
+}
+
+function buildNodeItem(n) {
+  const item = document.createElement('div');
+  item.className = 'node-item';
+  item.innerHTML = `${escapeHtml(n.content)}${n.reason ? `<div class="node-reason">理由：${escapeHtml(n.reason)}</div>` : ''}`;
+  return item;
+}
+
+function buildPileItem(o) {
+  const item = document.createElement('div');
+  item.className = 'pile-item';
+  item.innerHTML = `
+    <span class="pile-label">${escapeHtml(o.label)}</span>
+    <span class="pile-content">${escapeHtml(o.content)}${o.related_feature ? `<span class="pile-link">→ ${escapeHtml(o.related_feature)}</span>` : ''}</span>
+    <span class="pile-status status-pill ${o.status === 'resolved' ? 'resolved' : 'open'}">${o.status === 'resolved' ? '已解决' : '进行中'}</span>
+  `;
+  return item;
+}
+
+async function runCheck() {
+  const btn = document.getElementById('check-btn');
+  btn.disabled = true;
+  btn.textContent = '检查中…';
+  try {
+    const res = await fetch('/api/project/' + encodeURIComponent(currentTopic) + '/check', { method: 'POST' });
+    const data = await res.json();
+    // renderProject会整个重绘#check-result-box（清空），必须先重绘完，再把检查结果贴上去，
+    // 顺序反了的话结果会被重绘清掉。
+    await renderProject();
+    renderCheckResult(data);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '检查一下';
+  }
+}
+
+function renderCheckResult(data, targetBox) {
+  const box = targetBox || document.getElementById('check-result-box');
+  if (!box) return;
+  if (data.new_turns === 0) {
+    box.innerHTML = '<div class="check-result">没有新对话，跳过本次检查。</div>';
+    return;
+  }
+  const ext = data.extraction;
+  let html = `<div class="check-result">
+    <div class="title">处理了${data.new_turns}轮新对话</div>
+    新功能${ext.features.length}个，新卡点${ext.obstacles.length}个，新决定${ext.nodes.length}条
+  </div>`;
+  for (const [label, result] of Object.entries(data.verify_results || {})) {
+    const verdictClass = result.verdict || '';
+    html += `<div class="verify-box">
+      <div class="verify-verdict ${verdictClass}">${escapeHtml(label)}：${result.verdict || '核对失败'}</div>
+      <div>${escapeHtml(result.text)}</div>
+      ${result.verdict === '已实现' ? `<button class="confirm-btn" data-label="${escapeHtml(label)}">标记完成</button>` : ''}
+    </div>`;
+  }
+  box.innerHTML = html;
+  box.querySelectorAll('.confirm-btn').forEach(btn => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = '确认中…';
+      const r = await fetch('/api/project/' + encodeURIComponent(currentTopic) + '/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feature_label: btn.dataset.label }),
+      });
+      if (r.ok) {
+        btn.textContent = '已标记完成';
+        await renderProject();
+      } else {
+        btn.disabled = false;
+        btn.textContent = '标记失败，重试';
+      }
+    };
+  });
+}
+
+document.getElementById('attach-btn').onclick = async () => {
+  const path = document.getElementById('attach-path').value.trim();
+  const msg = document.getElementById('attach-msg');
+  if (!path) return;
+  msg.textContent = '接入中…';
+  msg.style.color = 'var(--muted)';
+  try {
+    const res = await fetch('/api/attach_hook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_path: path }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      msg.textContent = data.error || '接入失败';
+      msg.style.color = 'var(--warn)';
+      return;
+    }
+    msg.textContent = data.already_attached
+      ? '已经接过了，配置已确认'
+      : '接入成功！必须重开一个这个项目里的Claude Code会话才会生效。';
+    msg.style.color = 'var(--good)';
+    await loadProjects();
+  } catch (e) {
+    msg.textContent = '接入失败：' + e;
+    msg.style.color = 'var(--warn)';
+  }
+};
+
+loadProjects();
+</script>
+</body>
+</html>
